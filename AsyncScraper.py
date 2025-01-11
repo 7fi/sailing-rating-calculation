@@ -21,7 +21,7 @@ def getRaceNums(oldNums, scoresLen):
                 newNums.append(int(num[0]))
     return newNums
 
-def makeRaceSeries(score, team, raceNum, division, name, link, gradYear, position, partner, venue, regatta, date, teamlink, scoring):
+def makeRaceSeries(score, team, raceNum, division, name, link, gradYear, position, partner, partnerLink, venue, regatta, date, teamlink, scoring):
     raceSeries = pd.Series()
     raceSeries["Score"] = score
     raceSeries["Div"] = division
@@ -30,6 +30,7 @@ def makeRaceSeries(score, team, raceNum, division, name, link, gradYear, positio
     raceSeries["GradYear"] = gradYear
     raceSeries["Position"] = position
     raceSeries["Partner"] = partner
+    raceSeries["PartnerLink"] = partnerLink
     raceSeries["Venue"] = venue
     raceSeries["Regatta"] = regatta
     raceSeries["Scoring"] = scoring
@@ -264,19 +265,24 @@ def processData(soup):
         # update skippers and crews once all rows for a team are done.
         for skipper in skippers:
             partners = [crew['name'] for race in skipper['races'] for crew in crews if crew['div'] == skipper['div'] and race in crew['races']]
+            partnerLinks = [crew['link'] for race in skipper['races'] for crew in crews if crew['div'] == skipper['div'] and race in crew['races']]
             for i, score in enumerate(teamScores[skipper['div']]):
                 if i + 1 in skipper['races']:
                     partner = partners[skipper['races'].index(i + 1)] if skipper['races'].index(i + 1) < len(partners) else "Unknown"
-                    finalRaces.append(makeRaceSeries(score, teamHome, i + 1, skipper['div'], skipper['name'], skipper['link'],skipper['year'], "Skipper", partner, host,regatta, date, teamLink, scoring))
+                    partnerLink = partnerLinks[skipper['races'].index(i + 1)] if skipper['races'].index(i + 1) < len(partners) else "Unknown"
+                    finalRaces.append(makeRaceSeries(score, teamHome, i + 1, skipper['div'], skipper['name'], skipper['link'],skipper['year'], "Skipper", partner, partnerLink, host,regatta, date, teamLink, scoring))
         
         for crew in crews:
             partners = [skipper['name'] for race in crew['races'] for skipper in skippers if skipper['div'] == crew['div'] and race in skipper['races']]
+            partnerLinks = [skipper['link'] for race in crew['races'] for skipper in skippers if skipper['div'] == crew['div'] and race in skipper['races']]
+            
             if teamName == 'UC Davis':
                 print(crew['name'],partners)
             for i, score in enumerate(teamScores[crew['div']]):
                 if i + 1 in crew['races']:
                     partner = partners[crew['races'].index(i + 1)] if crew['races'].index(i + 1) < len(partners) else "Unknown"
-                    finalRaces.append(makeRaceSeries(score, teamHome, i + 1, crew['div'], crew['name'],crew['link'], crew['year'], "Crew", partner, host,regatta, date, teamLink, scoring))
+                    partnerLink = partnerLinks[crew['races'].index(i + 1)] if crew['races'].index(i + 1) < len(partners) else "Unknown"
+                    finalRaces.append(makeRaceSeries(score, teamHome, i + 1, crew['div'], crew['name'],crew['link'], crew['year'], "Crew", partner, partnerLink, host,regatta, date, teamLink, scoring))
 
         skippers = []
         crews = []
@@ -369,10 +375,10 @@ if __name__ == "__main__":
         totalRows = asyncio.run(main(regattas))
         totalRows = [sub for row in totalRows for sub in row]
         df_races = pd.concat([df_races, pd.DataFrame(totalRows)])
-        df_races.to_json(f"races.json", index=False)
+        df_races.to_json(f"racestest.json", index=False)
         if len(totalRows) > 0:
             df_races_new = pd.DataFrame(totalRows)
-            df_races_new.to_json("races_new.json", index=False)
+            df_races_new.to_json("races_new_test.json", index=False)
     else:
         print("no new races to be scraped.")
 
