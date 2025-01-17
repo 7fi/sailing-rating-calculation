@@ -1,2 +1,5 @@
 
 *.json
+/sailorPages
+/pages
+.DS_Store
