@@ -52,8 +52,11 @@ async def fetchData(client, semaphore, link):
         
     sailorData = sailorPage.find('meta',attrs={'name': 'ts:data'})
     if sailorData is not None:
-        sailorData = json.loads(sailorData['content'])
-        return [link, sailorData['name'],sailorData['first_name'],sailorData['last_name'],sailorData['gender'],sailorData['year'],sailorData['school'].split("/")[2], sailorData['id'], sailorData['external_id']]
+        try:
+            sailorData = json.loads(sailorData['content'])
+            return [link, sailorData['name'],sailorData['first_name'],sailorData['last_name'],sailorData['gender'],sailorData['year'],sailorData['school'].split("/")[2][:-1], sailorData['id'], sailorData['external_id']]
+        except:
+            return []
     else:
         return []
 
@@ -62,7 +65,6 @@ async def getBatch(client, links, semaphore):
     for link in links:
         tasks.append(fetchData(client, semaphore, link))
     results = await asyncio.gather(*tasks)
-    
     # tasks = [process_in_process(executor, regatta) for regatta in results]
     # rows = await asyncio.gather(*tasks)
     return results
@@ -84,7 +86,7 @@ if __name__ == "__main__":
     df_races = pd.read_json("races_new_test.json")
     links = df_races['Link'].dropna().unique()
   
-    totalRows = asyncio.run(main(links[70 * 100:]))
+    totalRows = asyncio.run(main(links))
     # totalRows = [sub for row in totalRows if row is not None for sub in row]
     df_races_new = pd.DataFrame(totalRows, columns=['link', 'name', 'first_name', 'last_name', 'gender', 'year', 'school','id', 'external_id'])
     df_races_new.to_json("sailor_data.json", index=False)
