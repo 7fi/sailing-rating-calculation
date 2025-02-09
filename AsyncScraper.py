@@ -378,7 +378,7 @@ if __name__ == "__main__":
         df_races.to_json(f"racestest.json", index=False)
         if len(totalRows) > 0:
             df_races_new = pd.DataFrame(totalRows)
-            df_races_new.to_json("races_new_test.json", index=False)
+            df_races_new.to_json("races_new_test2.json", index=False)
     else:
         print("no new races to be scraped.")
 

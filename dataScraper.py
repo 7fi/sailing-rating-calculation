@@ -89,4 +89,4 @@ if __name__ == "__main__":
     totalRows = asyncio.run(main(links))
     # totalRows = [sub for row in totalRows if row is not None for sub in row]
     df_races_new = pd.DataFrame(totalRows, columns=['link', 'name', 'first_name', 'last_name', 'gender', 'year', 'school','id', 'external_id'])
-    df_races_new.to_json("sailor_data.json", index=False)
+    df_races_new.to_json("sailor_data2.json", index=False)
