@@ -341,7 +341,7 @@ async def main(regattas):
 if __name__ == "__main__":
     start = time.time()
     seasons = [[f"f{i}",f"s{i}"] for i in range (16,25)]
-    seasons = [sub for s in seasons for sub in s]
+    seasons = [sub for s in seasons for sub in s] + ['s25']
     
     # seasons = ['f24']
 
@@ -375,10 +375,10 @@ if __name__ == "__main__":
         totalRows = asyncio.run(main(regattas))
         totalRows = [sub for row in totalRows for sub in row]
         df_races = pd.concat([df_races, pd.DataFrame(totalRows)])
-        df_races.to_json(f"racestest.json", index=False)
+        df_races.to_json(f"racesfr.json", index=False)
         if len(totalRows) > 0:
             df_races_new = pd.DataFrame(totalRows)
-            df_races_new.to_json("races_new_test2.json", index=False)
+            df_races_new.to_json("races_new_fr.json", index=False)
     else:
         print("no new races to be scraped.")
 
