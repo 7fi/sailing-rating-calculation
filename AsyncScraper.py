@@ -5,6 +5,7 @@ import asyncio
 import pandas as pd
 import numpy as np
 import time
+from datetime import date
 import os
 from concurrent.futures import ProcessPoolExecutor
 
@@ -348,10 +349,10 @@ if __name__ == "__main__":
     df_races = pd.DataFrame()
     try:
         print("attempting to read from file")
-        df_races = pd.read_json("racest.json")
+        df_races = pd.read_json("racesfr-20250310123.json")
         print("read from file")
     except:
-        df_races = pd.DataFrame(columns=["Score", "Div", "Sailor","Link", "GradYear", "Position", "Partner", "Venue", "Regatta", "Scoring", "raceID", "Date", "Team", "Teamlink"])
+        df_races = pd.DataFrame(columns=["Score", "Div", "Sailor","Link", "GradYear", "Position", "Partner", "Venue", "Regatta", "Scoring", "raceID", "Date", "Team", "Teamlink"]) 
 
     racesRegattas = df_races['Regatta'].unique()
     regattas = {}
@@ -375,7 +376,9 @@ if __name__ == "__main__":
         totalRows = asyncio.run(main(regattas))
         totalRows = [sub for row in totalRows for sub in row]
         df_races = pd.concat([df_races, pd.DataFrame(totalRows)])
+        df_races.reset_index(drop=True, inplace=True)
         df_races.to_json(f"racesfr.json", index=False)
+        df_races.to_json(f"racesfr-{date.today().strftime("%Y%m%d")}.json", index=False)
         if len(totalRows) > 0:
             df_races_new = pd.DataFrame(totalRows)
             df_races_new.to_json("races_new_fr.json", index=False)
