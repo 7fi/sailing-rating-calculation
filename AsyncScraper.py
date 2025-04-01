@@ -5,7 +5,7 @@ import asyncio
 import pandas as pd
 import numpy as np
 import time
-from datetime import date
+from datetime import date, datetime
 import os
 from concurrent.futures import ProcessPoolExecutor
 
@@ -46,13 +46,45 @@ async def cleanup_semaphore(semaphore):
         # Forcefully release if it was accidentally left locked
         semaphore.release()
         print("Semaphore was released manually.")
+        
+async def fetchSeasonRegattas(client, semaphore, link):
+    retries = 10
+    backoff = 1
+    for attempt in range(retries):
+        try:
+            async with semaphore:  # Limit concurrent requests
+                # full scores
+                url = f"https://scores.collegesailing.org/{link}/full-scores/"
+                page = await client.get(url)
+                with open(f"pages/{link}-fullscores.html", "w") as f:
+                    f.write(str(page.content))
+                seasonPage = BeautifulSoup(page.content, 'html.parser')
+                page.raise_for_status()  # Raise HTTPError for bad responses (4xx, 5xx)
+        except httpx.ConnectTimeout as e:
+            print(f"Connection timeout when fetching {url}. Retrying... ({attempt + 1}/{retries})")
+            await asyncio.sleep(backoff)  # Wait before retrying
+            backoff *= 2  # Exponential backoff
+        except httpx.ReadError as e:
+            print(f"Read error when fetching {url}. Retrying... ({attempt + 1}/{retries})")
+            await asyncio.sleep(backoff)  # Wait before retrying
+            backoff *= 2  # Exponential backoff
+        except httpx.HTTPStatusError as e:
+            print(f"HTTP error {e.response.status_code} when fetching {url}. Skipping...")
+            await cleanup_semaphore(semaphore)
+            return None
+        except httpx.RequestError as e:
+            print(f"Request error {e}. Skipping...")
+            await cleanup_semaphore(semaphore)
+            return None
+        await cleanup_semaphore(semaphore)
+    return seasonPage
 
-async def fetchData(client, semaphore,regattaID, link, scoring):
+async def fetchData(client, semaphore,regattaID, link, scoring, rescrape, date):
     retries = 10
     backoff = 1
     if not os.path.exists(f"pages/{link.split("/")[0]}"):
         os.makedirs(f"pages/{link.split("/")[0]}")
-    if os.path.exists(f"pages/{link}-fullscores.html") and os.path.exists(f"pages/{link}-sailors.html"):
+    if os.path.exists(f"pages/{link}-fullscores.html") and os.path.exists(f"pages/{link}-sailors.html") and not rescrape:
         with open(f"pages/{link}-fullscores.html", "r") as f:
             fullScores = BeautifulSoup(f.read(), 'html.parser')
         with open(f"pages/{link}-sailors.html", "r") as f:
@@ -93,7 +125,7 @@ async def fetchData(client, semaphore,regattaID, link, scoring):
                 await cleanup_semaphore(semaphore)
                 return None
         await cleanup_semaphore(semaphore)
-    return {'regattaID': regattaID, 'fullScores': fullScores, "sailors": sailors, 'scoring':scoring}
+    return {'regattaID': regattaID, 'fullScores': fullScores, "sailors": sailors, 'scoring':scoring, 'date': date}
 
 # need to deal with redress
 def parseScore(scoreString):
@@ -112,6 +144,7 @@ def processData(soup):
     fullScores = soup['fullScores']
     sailors = soup['sailors']
     scoring = soup['scoring']
+    date = soup['date']
     
     if len(fullScores.find_all('table', class_="results")) == 0: 
         print(f"no scores entered for {regatta}, skipping")
@@ -135,8 +168,8 @@ def processData(soup):
     teamHomes = [(scoreData[(k*(numDivisions + 1)) - (numDivisions + 1)].find('a').text) for k in range(teamCount)]
     
     host = fullScores.find("span", itemprop='location').text
-    date = fullScores.find("time").attrs['datetime']
-    date = date[:10]
+    # date = fullScores.find("time").attrs['datetime']
+    # date = date[:10]
     
     if scoring == "Combined":
         teamHomes = teamHomes * numDivisions
@@ -276,9 +309,7 @@ def processData(soup):
         for crew in crews:
             partners = [skipper['name'] for race in crew['races'] for skipper in skippers if skipper['div'] == crew['div'] and race in skipper['races']]
             partnerLinks = [skipper['link'] for race in crew['races'] for skipper in skippers if skipper['div'] == crew['div'] and race in skipper['races']]
-            
-            if teamName == 'UC Davis':
-                print(crew['name'],partners)
+
             for i, score in enumerate(teamScores[crew['div']]):
                 if i + 1 in crew['races']:
                     partner = partners[crew['races'].index(i + 1)] if crew['races'].index(i + 1) < len(partners) else "Unknown"
@@ -317,7 +348,7 @@ async def getBatch(client, regattaKeys, regattaValues, semaphore, executor):
     tasks = []
     for i, regatta in enumerate(regattaValues):
         regattaID = regattaKeys[i]
-        tasks.append(fetchData(client, semaphore, regattaID, regatta['link'], regatta['scoring']))
+        tasks.append(fetchData(client, semaphore, regattaID, regatta['link'], regatta['scoring'], regatta['rescrape'], regatta['date']))
     results = await asyncio.gather(*tasks)
     
     tasks = [process_in_process(executor, regatta) for regatta in results]
@@ -349,12 +380,13 @@ if __name__ == "__main__":
     df_races = pd.DataFrame()
     try:
         print("attempting to read from file")
-        df_races = pd.read_json("racesfr-20250310123.json")
+        df_races = pd.read_json("racesfr.json") 
         print("read from file")
     except:
         df_races = pd.DataFrame(columns=["Score", "Div", "Sailor","Link", "GradYear", "Position", "Partner", "Venue", "Regatta", "Scoring", "raceID", "Date", "Team", "Teamlink"]) 
 
     racesRegattas = df_races['Regatta'].unique()
+    
     regattas = {}
     for season in seasons:
         print("getting all regattas in", season)
@@ -365,10 +397,19 @@ if __name__ == "__main__":
         tbody = listSoup.find('table', class_="season-summary").find('tbody')
         
         for link in tbody.find_all("a", href=True):
-            if (season + "/" + link['href']) not in racesRegattas:
-                scoring = link.parent.next_sibling.next_sibling.next_sibling.text
-                if (scoring == "3 Divisions" or scoring == "2 Divisions" or scoring == "Combined"):
-                    regattas[season + "/" + link['href']] = {"link":season + "/" + link['href'], "scoring":scoring}
+            scoring = link.parent.next_sibling.next_sibling.next_sibling.text
+            regatta_date = link.parent.next_sibling.next_sibling.next_sibling.next_sibling.text
+            regatta_status = link.parent.next_sibling.next_sibling.next_sibling.next_sibling.next_sibling.text
+            rescrape = regatta_status != 'Official'
+            if (datetime.today() - datetime.strptime(regatta_date, "%m/%d/%Y")).days > 14:
+                rescrape = False 
+            if rescrape:
+                print(link['href'], regatta_date)
+                
+            scrape = (season + "/" + link['href']) not in racesRegattas or rescrape
+            
+            if (scoring == "3 Divisions" or scoring == "2 Divisions" or scoring == "Combined") and scrape:
+                regattas[season + "/" + link['href']] = {"link":season + "/" + link['href'], "scoring":scoring, 'rescrape': rescrape, 'date': regatta_date}
 
     # regattas = {'s24/st-francis-invite':{'link':'s24/st-francis-invite','scoring':'2 Divisions'}}
 
@@ -376,9 +417,9 @@ if __name__ == "__main__":
         totalRows = asyncio.run(main(regattas))
         totalRows = [sub for row in totalRows for sub in row]
         df_races = pd.concat([df_races, pd.DataFrame(totalRows)])
-        df_races.reset_index(drop=True, inplace=True)
-        df_races.to_json(f"racesfr.json", index=False)
-        df_races.to_json(f"racesfr-{date.today().strftime("%Y%m%d")}.json", index=False)
+        df_races = df_races.drop_duplicates(subset=['raceID', 'Sailor'], keep='last').reset_index(drop=True)
+        df_races.to_json(f"racesfr.json", index=False, date_format='iso')
+        df_races.to_json(f"racesfr-{date.today().strftime("%Y%m%d")}.json", index=False, date_format='iso')
         if len(totalRows) > 0:
             df_races_new = pd.DataFrame(totalRows)
             df_races_new.to_json("races_new_fr.json", index=False)
