@@ -107,10 +107,17 @@ async def main(links):
 if __name__ == "__main__":
     df_races = pd.read_json("racesfr.json")
     trPeople = pd.read_json("trSailorInfoAll.json")
+    old = pd.read_json("sailor_data2.json")
+    # old = old.sample(frac=0.8, random_state=42) # for testing
+    
     df_races['Link'] = df_races['Link'].fillna('Unknown') # fill empty links
     links = df_races['Link'].dropna().unique()
     links = np.append(links, trPeople['link'].dropna().unique())
     links = links[links != 'Unknown']
+    print(len(links))
+    old_links_set = set(old['link'])
+    links = [l for l in links if l not in old_links_set]
+    print(len(links))
     links = np.unique(links)
   
     totalRows = asyncio.run(main(links))
@@ -139,6 +146,6 @@ if __name__ == "__main__":
     df_no_link['external_id'] = np.nan
 
     # Concatenate the two DataFrames (with and without a link)
-    df_people_final = pd.concat([df_people, df_no_link], ignore_index=True)
+    df_people_final = pd.concat([old, df_people, df_no_link], ignore_index=True)
     
     df_people_final.to_json("sailor_data2.json", index=False)
