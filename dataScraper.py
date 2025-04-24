@@ -62,6 +62,8 @@ async def fetchData(client, semaphore, link):
             sailorData = {"name": 'Henriette Smith', 'year': '2016', 'school': '/schools/oregon/', 'gender': 'F','first_name': '', 'last_name': '', 'id': '', 'external_id': ''}
         elif link == 'iona-deacon':
             sailorData = {"name": 'Iona Deacon', 'year': '2016', 'school': '/schools/british-columbia/', 'gender': 'F', 'first_name': '', 'last_name': '', 'id': '', 'external_id': ''}
+        elif link == 'andrew-smith-2028':
+            sailorData = {"name": 'Andrew Smith', 'year': '2028', 'school': '/schools/michigan-state/', 'gender': 'M', 'first_name': '', 'last_name': '', 'id': '', 'external_id': ''}
         # elif link == 'catherine-lindsay':
         #     sailorData = {'gender': "F", 'name': 'Catherine "B" Lindsay', 'first_name':'Catherine "B"', 'last_name':'Lindsay', 'year': '2023', 'school': 'url:/schools/yale/', 'id': '3124222', 'external_id': None}
             
@@ -107,33 +109,41 @@ async def main(links):
 if __name__ == "__main__":
     df_races = pd.read_json("racesfr.json")
     trPeople = pd.read_json("trSailorInfoAll.json")
+    # old = pd.DataFrame()
     old = pd.read_json("sailor_data2.json")
     # old = old.sample(frac=0.8, random_state=42) # for testing
     
     df_races['Link'] = df_races['Link'].fillna('Unknown') # fill empty links
     links = df_races['Link'].dropna().unique()
-    links = np.append(links, trPeople['link'].dropna().unique())
+    if 'link' in trPeople.columns:
+        links = np.append(links, trPeople['link'].dropna().unique())
     links = links[links != 'Unknown']
     print(len(links))
-    old_links_set = set(old['link'])
-    links = [l for l in links if l not in old_links_set]
+    if len(old) > 0:
+        old_links_set = set(old['link'])
+        links = [l for l in links if l not in old_links_set]
     print(len(links))
     links = np.unique(links)
   
     totalRows = asyncio.run(main(links))
+    # print(totalRows.shape())
     df_people = pd.DataFrame(totalRows, columns=['key', 'link', 'name', 'first_name', 'last_name', 'gender', 'year', 'teamLink','team','id', 'external_id'])
     
     # Filter people without a link in df_races
     df_races_no_link = df_races[df_races['Link'] == 'Unknown']
 
     # Filter people without a link in trPeople
-    trPeople_no_link = trPeople[trPeople['link'] == 'Unknown']
+    if 'link' in trPeople.columns:
+        trPeople_no_link = trPeople[trPeople['link'] == 'Unknown']
 
-    # Combine the data from both sources (people without a link)
-    df_no_link = pd.concat([
-        df_races_no_link[['Sailor', 'GradYear', 'Team']].rename(columns={'Sailor': 'name', 'GradYear': 'year', 'Team': 'team'}),
-        trPeople_no_link[['key', 'name', 'year', 'team']]
-    ])
+        # Combine the data from both sources (people without a link)
+        df_no_link = pd.concat([
+            df_races_no_link[['Sailor', 'GradYear', 'Team']].rename(columns={'Sailor': 'name', 'GradYear': 'year', 'Team': 'team'}),
+            trPeople_no_link[['key', 'name', 'year', 'team']]
+        ])
+    else:
+        df_no_link = df_races_no_link[['Sailor', 'GradYear', 'Team']].rename(columns={'Sailor': 'name', 'GradYear': 'year', 'Team': 'team'})
+        df_no_link['key'] = pd.Series()
 
     # Add default values for missing columns to match the structure of df_people
     df_no_link['key'] = df_no_link['key'].fillna(df_no_link['name'] + '-' + df_no_link['team'])
@@ -146,6 +156,9 @@ if __name__ == "__main__":
     df_no_link['external_id'] = np.nan
 
     # Concatenate the two DataFrames (with and without a link)
-    df_people_final = pd.concat([old, df_people, df_no_link], ignore_index=True)
+    if len(old) > 0:
+        df_people_final = pd.concat([old, df_people, df_no_link], ignore_index=True)
+    else: 
+        df_people_final = pd.concat([df_people, df_no_link], ignore_index=True)
     
     df_people_final.to_json("sailor_data2.json", index=False)
