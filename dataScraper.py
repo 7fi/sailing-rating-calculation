@@ -106,7 +106,8 @@ async def main(links):
             allRows.extend(results)
         return allRows
 
-if __name__ == "__main__":
+def runSailorData():
+    print("Scraping sailor data")
     df_races = pd.read_json("racesfr.json")
     trPeople = pd.read_json("trSailorInfoAll.json")
     # old = pd.DataFrame()
@@ -162,3 +163,8 @@ if __name__ == "__main__":
         df_people_final = pd.concat([df_people, df_no_link], ignore_index=True)
     
     df_people_final.to_json("sailor_data2.json", index=False)
+    return df_people_final
+
+
+# if __name__ == "__main__":
+#     runSailorData()

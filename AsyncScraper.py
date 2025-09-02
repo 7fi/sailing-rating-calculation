@@ -370,7 +370,9 @@ async def main(regattas):
             allRows.extend(results)
         return allRows
 
-if __name__ == "__main__":
+
+def runFleetScrape():
+    print("----SCRAPING FLEET RACING----")
     start = time.time()
     seasons = [[f"f{i}",f"s{i}"] for i in range (16,25)]
     seasons = [sub for s in seasons for sub in s] + ['s25']
@@ -428,3 +430,7 @@ if __name__ == "__main__":
 
     end = time.time()
     print(f"{int((end-start) // 60)}:{int((end-start) % 60)}")
+    return df_races
+
+# if __name__ == "__main__":
+#     runFleetScrape()
