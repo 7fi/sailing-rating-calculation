@@ -76,6 +76,7 @@ targetElo = 1000
 
 targetSeasons = ['s25', 'f25']
 targetTRSeasons = ['s25']
+gradCutoff = 2025
 # baseSigma = baseElo // 3
 # offset = baseElo * 2
 
@@ -139,9 +140,21 @@ def setupPeople(df_sailor_ratings, df_sailor_info):
         del people[oldkey]
         
         # replace merged names in dataset 
-        df_races_full['key'] = df_races_full['key'].replace(oldkey, newkey)    
+        df_races_full['key'] = df_races_full['key'].replace(oldkey, newkey)
         
     return people 
+
+def validPerson(p, type):
+    # print((2000 + int(p.year.split()[0]) if isinstance(p.year, str) and len(p.year.split()) > 1 else int(p.year)))
+    return (p.cross > 20 
+        and p.outLinks > 70 
+        # if sum([race['cross'] for race in p.races if 'cross' in race.keys()]) > 20
+        # and sum([race['outLinks'] for race in p.races if 'outLinks' in race.keys()]) > 70
+        and not set(p.seasons[type]).isdisjoint(targetSeasons) 
+        # and (2000 + int(p.year.split()[0]) > gradCutoff if isinstance(p.year, str) and len(p.year.split()) > 1 else int(p.year) > gradCutoff)
+        # and sum([p['raceCount'][seas] for seas in targetSeasons if seas in p['raceCount'].keys()]) > 5
+    )
+
 
 def getTeamRatings(people, team, targetSeasons):
     filtered_people = [p for p in people.values() if team in p.teams]
@@ -150,12 +163,7 @@ def getTeamRatings(people, team, targetSeasons):
     numTops = 3
     if len(current) > 0:
         topSkippers = sorted([p for p in filtered_people
-                                if p.cross > 20 and p.outLinks > 70
-                                # if sum([race['cross'] for race in p.races if 'cross' in race.keys()]) > 20
-                                # and sum([race['outLinks'] for race in p.races if 'outLinks' in race.keys()]) > 70
-                                and not set(p.seasons['skipper']).isdisjoint(targetSeasons)
-                                # and sum([p['raceCount'][seas] for seas in targetSeasons if seas in p['raceCount'].keys()]) > 5
-                                  ],
+                                if validPerson(p,'skipper')],
                              key=lambda x: x.sr.ordinal(target=targetElo, alpha=200 / model.sigma),
                              reverse=True)
         topSkipperSum = sum([p.sr.ordinal(target=targetElo,alpha=200 / model.sigma) 
@@ -163,11 +171,7 @@ def getTeamRatings(people, team, targetSeasons):
         topSkippers = [{'name':p.name, 'key': p.key, 'mu': p.sr.mu, 'sigma': p.sr.sigma} for p in topSkippers]
         
         topCrews = sorted([p for p in filtered_people
-                                if p.cross > 20 and p.outLinks > 70
-                                # if sum([race['cross'] for race in p.races if 'cross' in race.keys()]) > 20
-                                # and sum([race['outLinks'] for race in p.races if 'outLinks' in race.keys()]) > 70
-                                and not set(p.seasons['crew']).isdisjoint(targetSeasons)
-                                  ], 
+                                if validPerson(p,'crew')],
                              key=lambda x: x.cr.ordinal(target=targetElo, alpha=200 / model.sigma), 
                              reverse=True)
         topCrewsSum = sum([p.cr.ordinal(target=targetElo,alpha=200 / model.sigma) 
@@ -179,25 +183,14 @@ def getTeamRatings(people, team, targetSeasons):
 
         # Women's
         numTops = 2
-        topWomenSkippers = sorted([p for p in filtered_people
-                                   if p.cross > 20 and p.outLinks > 70
-                                # if sum([race['cross'] for race in p.races if 'cross' in race.keys()]) > 20
-                                # and sum([race['outLinks'] for race in p.races if 'outLinks' in race.keys()]) > 70
-                                and not set(p.seasons['skipper']).isdisjoint(targetSeasons)
-                                # and sum([p['raceCount'][seas] for seas in targetSeasons if seas in p['raceCount'].keys()]) > 5
-                                  ],
+        topWomenSkippers = sorted([p for p in filtered_people if validPerson(p,'skipper')],
                              key=lambda x: x.wsr.ordinal(target=targetElo, alpha=200 / model.sigma),
                              reverse=True)
         topWomenSkipperSum = sum([p.wsr.ordinal(target=targetElo,alpha=200 / model.sigma) 
                                                    for p in topWomenSkippers[:numTops]])
         topWomenSkippers = [{'name':p.name, 'key': p.key, 'mu': p.wsr.mu, 'sigma': p.wsr.sigma} for p in topWomenSkippers]
         
-        topWomenCrews = sorted([p for p in filtered_people
-                                if p.cross > 20 and p.outLinks > 70
-                                # if sum([race['cross'] for race in p.races if 'cross' in race.keys()]) > 20
-                                # and sum([race['outLinks'] for race in p.races if 'outLinks' in race.keys()]) > 70
-                                and not set(p.seasons['crew']).isdisjoint(targetSeasons)
-                                  ], 
+        topWomenCrews = sorted([p for p in filtered_people if validPerson(p,'crew')], 
                              key=lambda x: x.wcr.ordinal(target=targetElo, alpha=200 / model.sigma), 
                              reverse=True)
         topWomenCrewsSum = sum([p.wcr.ordinal(target=targetElo,alpha=200 / model.sigma) 
@@ -265,6 +258,7 @@ def getTeamRatings(people, team, targetSeasons):
                 'trcrews': topCrewsTR, 
                 'wtrskippers': topWomenSkippersTR,
                 'wtrcrews': topWomenCrewsTR}
+        
 def getTeamRanks(people, season, lastRanks=None):
     trs = {}
     for team in teamRegions.keys():
@@ -283,150 +277,6 @@ def getTeamRanks(people, season, lastRanks=None):
                 ranks[team] = {}
             ranks[team][type2] = i + 1
     return ranks
-  
-def calculateTR(people, date, regatta, race, row, type, scoring, season, regattaAvg, womens):
-    venue = row['Venue'].iat[0]
-    
-    teamAName = row['teamAName'].iat[0]
-    teamAKeys = [boat[type.lower() + 'Key'] if boat[type.lower() + 'Key'] is not None else 'Unknown' for boat in row['teamABoats'].iat[0]] 
-    # teamANames = [boat[type.lower() + 'Name'] for boat in row['teamABoats'].iat[0]]
-    for oldkey, newkey in merges.items():
-            if oldkey in teamAKeys:
-                teamAKeys = [k if k != oldkey else newkey for k in teamAKeys]
-    teamARacers = [people[key] for key in teamAKeys if 'Unknown' not in key and key in people.keys()]
-    
-    teamBName = row['teamBName'].iat[0]
-    teamBKeys = [boat[type.lower() + 'Key'] if boat[type.lower() + 'Key'] is not None else 'Unknown' for boat in row['teamBBoats'].iat[0]] 
-    # teamBNames = [boat[type.lower() + 'Name'] for boat in row['teamBBoats'].iat[0]]
-    for oldkey, newkey in merges.items():
-            if oldkey in teamBKeys:
-                teamBKeys = [k if k != oldkey else newkey for k in teamBKeys]
-    teamBRacers = [people[key] for key in teamBKeys if 'Unknown' not in key and key in people.keys()]
-    
-    teamARatings = []
-    if womens:
-        teamARatings = [r.wtsr if type == 'Skipper' else r.wtcr for r in teamARacers]
-    else:
-        teamARatings = [r.tsr if type == 'Skipper' else r.tcr for r in teamARacers]
-        
-    teamBRatings = []
-    if womens:
-        teamBRatings = [r.wtsr if type == 'Skipper' else r.wtcr for r in teamBRacers]
-    else:
-        teamBRatings = [r.tsr if type == 'Skipper' else r.tcr for r in teamBRacers]
-    
-    startingARating = [r.ordinal(target=targetElo, alpha=200 / model.sigma) for r in teamARatings]
-    startingBRating = [r.ordinal(target=targetElo, alpha=200 / model.sigma) for r in teamBRatings]
-    
-    if len(teamARatings) < 1 or len(teamBRatings) < 1:
-        # print("not enough sailors in this race, skipping", row['raceID'].iat[0])
-        return
-    
-    predictions = model.predict_rank([teamARatings, teamBRatings])
-    
-    ratings = model.rate([teamARatings, teamBRatings], 
-                        ranks=[1 if row['teamAOutcome'].iat[0] == 'win' else 2, 1 if row['teamBOutcome'].iat[0] == 'win' else 2])
-    
-    
-    for team, name, newRatings in zip([teamARacers, teamBRacers], [teamAName, teamBName], ratings):
-        for racer, new_rating in zip(team, newRatings):
-            # print(new_rating.ordinal(target=targetElo, alpha=200 / model.sigma))
-            # racer.teams = [name]
-            if row['raceID'].iat[0].split("/")[0] not in racer.seasons[type.lower()]:
-                np.append(racer.seasons[type.lower()], [row['raceID'].iat[0].split("/")[0]])
-            if type == 'Skipper':
-                if womens:
-                    racer.wtsr = new_rating
-                else: 
-                    racer.tsr = new_rating
-            else:
-                if womens:
-                    racer.wtcr = new_rating
-                else:
-                    racer.tcr = new_rating
-                    
-    if womens:
-        teamARatings = [r.wtsr if type == 'Skipper' else r.wtcr for r in teamARacers]
-    else:
-        teamARatings = [r.tsr if type == 'Skipper' else r.tcr for r in teamARacers]
-        
-    if womens:
-        teamBRatings = [r.wtsr if type == 'Skipper' else r.wtcr for r in teamBRacers]
-    else:
-        teamBRatings = [r.tsr if type == 'Skipper' else r.tcr for r in teamBRacers]
-        
-    endingARatings = [r.ordinal(target=targetElo, alpha=200 / model.sigma) for r in teamARatings]
-    endingBRatings = [r.ordinal(target=targetElo, alpha=200 / model.sigma) for r in teamBRatings]
-    
-    AChanges = [e-s for s,e in zip(startingARating, endingARatings)]
-    BChanges = [e-s for s,e in zip(startingBRating, endingBRatings)]
-    
-    for tscore, toutcome, oppt, oppn, index, racers, oppRacers, changes, boats in zip(
-                                            [row['teamAScore'].iat[0], row['teamBScore'].iat[0]], 
-                                            [row['teamAOutcome'].iat[0],row['teamBOutcome'].iat[0]],
-                                            [row['teamBName'].iat[0], row['teamAName'].iat[0]], 
-                                            [row['teamBNick'].iat[0], row['teamANick'].iat[0]], 
-                                            [0,1],
-                                            [teamARacers, teamBRacers], 
-                                            [teamBRacers, teamARacers], 
-                                            [AChanges, BChanges],
-                                            [row['teamABoats'].iat[0], row['teamBBoats'].iat[0]]):
-        
-        partnerKeys = [boat['crewKey'] if boat['crewKey'] is not None else 'Unknown' for boat in boats]
-        partnerNames = [boat['crewName'] if boat['crewName'] is not None else 'Unknown' for boat in boats]
-        if type == 'Crew':
-            partnerKeys = [boat['skipperKey'] if boat['skipperKey'] is not None else 'Unknown' for boat in boats]
-            partnerNames = [boat['skipperName'] if boat['skipperName'] is not None else 'Unknown' for boat in boats]
-            
-        for racer, change, partnerKey, partnerName in zip(racers, changes, partnerKeys, partnerNames):
-            
-            partnerKey = partnerKey if partnerKey not in merges.keys() else merges[partnerKey]
-            
-            #Calculate Rivals
-            for opp in oppRacers:
-                if type not in racer.rivals:
-                    racer.rivals[type] = {}
-                    
-                if opp.key not in racer.rivals[type]:
-                    racer.rivals[type][opp.key] = {'name': opp.name,'races': {}, 'team': opp.teams[-1], 'wins': {}}
-            
-                if season not in racer.rivals[type][opp.key]['races'].keys():
-                    racer.rivals[type][opp.key]['races'][season] = 0
-                if season not in racer.rivals[type][opp.key]['wins'].keys():
-                    racer.rivals[type][opp.key]['wins'][season] = 0
-                    
-                racer.rivals[type][opp.key]['races'][season] += 1
-                if toutcome == 'win':
-                    racer.rivals[type][opp.key]['wins'][season] += 1
-            
-            # Make sure seasons are updated        
-            if season not in racer.seasons[type.lower()]:
-                racer.seasons[type.lower()] = np.append(racer.seasons[type.lower()], season)
-
-            racer.races.append({'raceID': row['raceID'].iat[0], 'raceNum': int(row['raceNum'].iat[0]), 'round':  row['round'].iat[0], 
-                                'pos': type,
-                                'date': date,
-                                'womens': womens,
-                                'partner': {'key': partnerKey, 'name': partnerName},
-                                'opponentTeam': oppt, 
-                                'opponentNick': oppn,
-                                'score': tscore,
-                                'outcome': toutcome, 
-                                'predicted': 'win' if predictions[index][0] == 1 else 'lose',
-                                'skipperRating': racer.sr.ordinal(target=targetElo, alpha=200 / model.sigma),
-                                'crewRating': racer.cr.ordinal(target=targetElo, alpha=200 / model.sigma),
-                                'womenSkipperRating': racer.wsr.ordinal(target=targetElo, alpha=200 / model.sigma),
-                                'womenCrewRating': racer.wcr.ordinal(target=targetElo, alpha=200 / model.sigma),
-                                'tsr': racer.tsr.ordinal(target=targetElo, alpha=200 / model.sigma),
-                                'tcr': racer.tcr.ordinal(target=targetElo, alpha=200 / model.sigma),
-                                'wtsr': racer.wtsr.ordinal(target=targetElo, alpha=200 / model.sigma),
-                                'wtcr': racer.wtcr.ordinal(target=targetElo, alpha=200 / model.sigma),
-                                'regAvg': regattaAvg,
-                                'change': float(change),
-                                'venue': venue,
-                                'type': 'team'
-                                })
-
 def calculateFR(people, date, regatta, race, row, type, scoring, season, residuals, regattaAvg, womens):
     # Filter by current position 
     scores = row[row['Position'] == type]
@@ -576,6 +426,149 @@ def calculateFR(people, date, regatta, race, row, type, scoring, season, residua
             'type': 'fleet',
             'scoring': scoring
         })
+def calculateTR(people, date, regatta, race, row, type, scoring, season, regattaAvg, womens): 
+    venue = row['Venue'].iat[0]
+    
+    teamAName = row['teamAName'].iat[0]
+    teamAKeys = [boat[type.lower() + 'Key'] if boat[type.lower() + 'Key'] is not None else 'Unknown' for boat in row['teamABoats'].iat[0]] 
+    # teamANames = [boat[type.lower() + 'Name'] for boat in row['teamABoats'].iat[0]]
+    for oldkey, newkey in merges.items():
+            if oldkey in teamAKeys:
+                teamAKeys = [k if k != oldkey else newkey for k in teamAKeys]
+    teamARacers = [people[key] for key in teamAKeys if 'Unknown' not in key and key in people.keys()]
+    
+    teamBName = row['teamBName'].iat[0]
+    teamBKeys = [boat[type.lower() + 'Key'] if boat[type.lower() + 'Key'] is not None else 'Unknown' for boat in row['teamBBoats'].iat[0]] 
+    # teamBNames = [boat[type.lower() + 'Name'] for boat in row['teamBBoats'].iat[0]]
+    for oldkey, newkey in merges.items():
+            if oldkey in teamBKeys:
+                teamBKeys = [k if k != oldkey else newkey for k in teamBKeys]
+    teamBRacers = [people[key] for key in teamBKeys if 'Unknown' not in key and key in people.keys()]
+    
+    teamARatings = []
+    if womens:
+        teamARatings = [r.wtsr if type == 'Skipper' else r.wtcr for r in teamARacers]
+    else:
+        teamARatings = [r.tsr if type == 'Skipper' else r.tcr for r in teamARacers]
+        
+    teamBRatings = []
+    if womens:
+        teamBRatings = [r.wtsr if type == 'Skipper' else r.wtcr for r in teamBRacers]
+    else:
+        teamBRatings = [r.tsr if type == 'Skipper' else r.tcr for r in teamBRacers]
+    
+    startingARating = [r.ordinal(target=targetElo, alpha=200 / model.sigma) for r in teamARatings]
+    startingBRating = [r.ordinal(target=targetElo, alpha=200 / model.sigma) for r in teamBRatings]
+    
+    if len(teamARatings) < 1 or len(teamBRatings) < 1:
+        # print("not enough sailors in this race, skipping", row['raceID'].iat[0])
+        return
+    
+    predictions = model.predict_rank([teamARatings, teamBRatings])
+    
+    ratings = model.rate([teamARatings, teamBRatings], 
+                        ranks=[1 if row['teamAOutcome'].iat[0] == 'win' else 2, 1 if row['teamBOutcome'].iat[0] == 'win' else 2])
+    
+    
+    for team, name, newRatings in zip([teamARacers, teamBRacers], [teamAName, teamBName], ratings):
+        for racer, new_rating in zip(team, newRatings):
+            # print(new_rating.ordinal(target=targetElo, alpha=200 / model.sigma))
+            # racer.teams = [name]
+            if row['raceID'].iat[0].split("/")[0] not in racer.seasons[type.lower()]:
+                np.append(racer.seasons[type.lower()], [row['raceID'].iat[0].split("/")[0]])
+            if type == 'Skipper':
+                if womens:
+                    racer.wtsr = new_rating
+                else: 
+                    racer.tsr = new_rating
+            else:
+                if womens:
+                    racer.wtcr = new_rating
+                else:
+                    racer.tcr = new_rating
+                    
+    if womens:
+        teamARatings = [r.wtsr if type == 'Skipper' else r.wtcr for r in teamARacers]
+    else:
+        teamARatings = [r.tsr if type == 'Skipper' else r.tcr for r in teamARacers]
+        
+    if womens:
+        teamBRatings = [r.wtsr if type == 'Skipper' else r.wtcr for r in teamBRacers]
+    else:
+        teamBRatings = [r.tsr if type == 'Skipper' else r.tcr for r in teamBRacers]
+        
+    endingARatings = [r.ordinal(target=targetElo, alpha=200 / model.sigma) for r in teamARatings]
+    endingBRatings = [r.ordinal(target=targetElo, alpha=200 / model.sigma) for r in teamBRatings]
+    
+    AChanges = [e-s for s,e in zip(startingARating, endingARatings)]
+    BChanges = [e-s for s,e in zip(startingBRating, endingBRatings)]
+    
+    for tscore, toutcome, oppt, oppn, index, racers, oppRacers, changes, boats in zip(
+                                            [row['teamAScore'].iat[0], row['teamBScore'].iat[0]], 
+                                            [row['teamAOutcome'].iat[0],row['teamBOutcome'].iat[0]],
+                                            [row['teamBName'].iat[0], row['teamAName'].iat[0]], 
+                                            [row['teamBNick'].iat[0], row['teamANick'].iat[0]], 
+                                            [0,1],
+                                            [teamARacers, teamBRacers], 
+                                            [teamBRacers, teamARacers], 
+                                            [AChanges, BChanges],
+                                            [row['teamABoats'].iat[0], row['teamBBoats'].iat[0]]):
+        
+        partnerKeys = [boat['crewKey'] if boat['crewKey'] is not None else 'Unknown' for boat in boats]
+        partnerNames = [boat['crewName'] if boat['crewName'] is not None else 'Unknown' for boat in boats]
+        if type == 'Crew':
+            partnerKeys = [boat['skipperKey'] if boat['skipperKey'] is not None else 'Unknown' for boat in boats]
+            partnerNames = [boat['skipperName'] if boat['skipperName'] is not None else 'Unknown' for boat in boats]
+            
+        for racer, change, partnerKey, partnerName in zip(racers, changes, partnerKeys, partnerNames):
+            
+            partnerKey = partnerKey if partnerKey not in merges.keys() else merges[partnerKey]
+            
+            #Calculate Rivals
+            for opp in oppRacers:
+                if type not in racer.rivals:
+                    racer.rivals[type] = {}
+                    
+                if opp.key not in racer.rivals[type]:
+                    racer.rivals[type][opp.key] = {'name': opp.name,'races': {}, 'team': opp.teams[-1], 'wins': {}}
+            
+                if season not in racer.rivals[type][opp.key]['races'].keys():
+                    racer.rivals[type][opp.key]['races'][season] = 0
+                if season not in racer.rivals[type][opp.key]['wins'].keys():
+                    racer.rivals[type][opp.key]['wins'][season] = 0
+                    
+                racer.rivals[type][opp.key]['races'][season] += 1
+                if toutcome == 'win':
+                    racer.rivals[type][opp.key]['wins'][season] += 1
+            
+            # Make sure seasons are updated        
+            if season not in racer.seasons[type.lower()]:
+                racer.seasons[type.lower()] = np.append(racer.seasons[type.lower()], season)
+
+            racer.races.append({'raceID': row['raceID'].iat[0], 'raceNum': int(row['raceNum'].iat[0]), 'round':  row['round'].iat[0], 
+                                'pos': type,
+                                'date': date,
+                                'womens': womens,
+                                'partner': {'key': partnerKey, 'name': partnerName},
+                                'opponentTeam': oppt, 
+                                'opponentNick': oppn,
+                                'score': tscore,
+                                'outcome': toutcome, 
+                                'predicted': 'win' if predictions[index][0] == 1 else 'lose',
+                                'skipperRating': racer.sr.ordinal(target=targetElo, alpha=200 / model.sigma),
+                                'crewRating': racer.cr.ordinal(target=targetElo, alpha=200 / model.sigma),
+                                'womenSkipperRating': racer.wsr.ordinal(target=targetElo, alpha=200 / model.sigma),
+                                'womenCrewRating': racer.wcr.ordinal(target=targetElo, alpha=200 / model.sigma),
+                                'tsr': racer.tsr.ordinal(target=targetElo, alpha=200 / model.sigma),
+                                'tcr': racer.tcr.ordinal(target=targetElo, alpha=200 / model.sigma),
+                                'wtsr': racer.wtsr.ordinal(target=targetElo, alpha=200 / model.sigma),
+                                'wtcr': racer.wtcr.ordinal(target=targetElo, alpha=200 / model.sigma),
+                                'regAvg': regattaAvg,
+                                'change': float(change),
+                                'venue': venue,
+                                'type': 'team'
+                                })
+
 
 def main(df_sailor_ratings, df_sailor_info):
   people = {}
@@ -830,72 +823,74 @@ def uploadSailors(people):
   eligible = [p for p in people.values() if (targetSeasons[-1] in p.seasons['skipper'] 
                                           or targetSeasons[-1] in p.seasons['crew']) 
                                           and len(p.races) > 0
-                                          and type(p.races[-1]['date'] != type("hi"))
-                                          and (today - p.races[-1]['date']).days < 7]
+                                          and type(p.races[-1]['date']) != type("hi")
+                                          and (today - p.races[-1]['date']).days < 14]
+  
   # eligible = [p for p in people.values() if 'team' in [r['type'] for r in p.races]]
 
-  # eligible = [people['adrian-winkelman']]
+#   eligible = [people['elliott-chalcraft']]
   print(len(eligible))
 
   # Iterate over the people values
   # for i, p in enumerate(people.values()):
   for i, p in enumerate(eligible):
 
-  # p = people['eva-ermlich']
-  # Prepare the document data to be written
-      if i % 100 == 0:
-          print("Currently uploading:",i, p.name)
-      try:
-          doc_data = {
-              "Name": p.name,
-              "key": p.key.replace("/", "-"),
-              'gender': p.gender,
-              "Teams": p.teams.tolist() if isinstance(p.teams, np.ndarray) else p.teams,
-              "SkipperRating": int(p.sr.ordinal(target=targetElo, alpha=200 / model.sigma)),
-              "CrewRating": int(p.cr.ordinal(target=targetElo, alpha=200 / model.sigma)),
-              "WomenSkipperRating": int(p.wsr.ordinal(target=targetElo, alpha=200 / model.sigma)),
-              "WomenCrewRating": int(p.wcr.ordinal(target=targetElo, alpha=200 / model.sigma)),
-              "tsr": int(p.tsr.ordinal(target=targetElo, alpha=200 / model.sigma)),
-              "tcr": int(p.tcr.ordinal(target=targetElo, alpha=200 / model.sigma)),
-              "wtsr": int(p.wtsr.ordinal(target=targetElo, alpha=200 / model.sigma)),
-              "wtcr": int(p.wtcr.ordinal(target=targetElo, alpha=200 / model.sigma)),
-              "SkipperRank": int(p.skipperRank),
-              "CrewRank": int(p.crewRank),
-              "WomenSkipperRank": int(p.womenSkipperRank),
-              "WomenCrewRank": int(p.womenCrewRank),
-              "SkipperRank": int(p.skipperRank),
-              "CrewRank": int(p.crewRank),
-              "WomenSkipperRank": int(p.womenSkipperRank),
-              "WomenCrewRank": int(p.womenCrewRank),
-              "SkipperRankTR": int(p.skipperRankTR),
-              "CrewRankTR": int(p.crewRankTR),
-              "WomenSkipperRankTR": int(p.womenSkipperRankTR),
-              "WomenCrewRankTR": int(p.womenCrewRankTR),
-              "Links": p.links.tolist() if isinstance(p.links, np.ndarray) else p.links if isinstance(p.links, str) or isinstance(p.links, list) else p.links[0].tolist(),
-              "Year": p.year,
-              "Seasons": {'skipper': list(p.seasons['skipper']), 'crew': list(p.seasons['crew'])},
-              "Cross":  sum([race['cross'] for race in p.races if 'cross' in race.keys()]),
-              "OutLinks": sum([race['outLinks'] for race in p.races if 'outLinks' in race.keys()]),
-              'races': p.races,
-              "Rivals": p.rivals,
-              "lastUpdate": firestore.SERVER_TIMESTAMP
-          }
-      except Exception as e:
+    # p = people['eva-ermlich']
+    # Prepare the document data to be written
+    if i % 100 == 0:
+        print("Currently uploading:",i, p.name)
+    try:
+        doc_data = {
+            "Name": p.name,
+            "key": p.key.replace("/", "-"),
+            'gender': p.gender,
+            "Teams": p.teams.tolist() if isinstance(p.teams, np.ndarray) else p.teams,
+            "SkipperRating": int(p.sr.ordinal(target=targetElo, alpha=200 / model.sigma)),
+            "CrewRating": int(p.cr.ordinal(target=targetElo, alpha=200 / model.sigma)),
+            "WomenSkipperRating": int(p.wsr.ordinal(target=targetElo, alpha=200 / model.sigma)),
+            "WomenCrewRating": int(p.wcr.ordinal(target=targetElo, alpha=200 / model.sigma)),
+            "tsr": int(p.tsr.ordinal(target=targetElo, alpha=200 / model.sigma)),
+            "tcr": int(p.tcr.ordinal(target=targetElo, alpha=200 / model.sigma)),
+            "wtsr": int(p.wtsr.ordinal(target=targetElo, alpha=200 / model.sigma)),
+            "wtcr": int(p.wtcr.ordinal(target=targetElo, alpha=200 / model.sigma)),
+            "SkipperRank": int(p.skipperRank),
+            "CrewRank": int(p.crewRank),
+            "WomenSkipperRank": int(p.womenSkipperRank),
+            "WomenCrewRank": int(p.womenCrewRank),
+            "SkipperRank": int(p.skipperRank),
+            "CrewRank": int(p.crewRank),
+            "WomenSkipperRank": int(p.womenSkipperRank),
+            "WomenCrewRank": int(p.womenCrewRank),
+            "SkipperRankTR": int(p.skipperRankTR),
+            "CrewRankTR": int(p.crewRankTR),
+            "WomenSkipperRankTR": int(p.womenSkipperRankTR),
+            "WomenCrewRankTR": int(p.womenCrewRankTR),
+            "Links": p.links.tolist() if isinstance(p.links, np.ndarray) else p.links if isinstance(p.links, str) or isinstance(p.links, list) else p.links[0].tolist(),
+            "Year": p.year,
+            "Seasons": {'skipper': list(p.seasons['skipper']), 'crew': list(p.seasons['crew'])},
+            "Cross":  sum([race['cross'] for race in p.races if 'cross' in race.keys()]),
+            "OutLinks": sum([race['outLinks'] for race in p.races if 'outLinks' in race.keys()]),
+            'races': p.races,
+            "Rivals": p.rivals,
+            "lastUpdate": firestore.SERVER_TIMESTAMP
+        }
+
+    except Exception as e:
           print(p, p.links)
           raise e
 
-      # Add the set operation to the batch
-      doc_ref = col.document(p.key.replace("/", "-"))
-      batch.set(doc_ref, doc_data, merge=True)
+    # Add the set operation to the batch
+    doc_ref = col.document(p.key.replace("/", "-"))
+    batch.set(doc_ref, doc_data, merge=True)
 
-      # Commit the batch every 20 documents
-      if (i + 1) % batch_size == 0:
-          batch.commit()
-          batch = db.batch()  # Start a new batch for the next set of documents
+    # Commit the batch every 20 documents
+    if (i + 1) % batch_size == 0:
+        batch.commit()
+        batch = db.batch()  # Start a new batch for the next set of documents
 
   # Commit any remaining operations if there are less than 20 documents left
-  if (i + 1) % batch_size != 0:
-      batch.commit()
+  # if (i + 1) % batch_size != 0:
+  batch.commit()
     
 def uploadTeams(df_sailors):
 
@@ -1023,10 +1018,11 @@ def uploadTeams(df_sailors):
           
       #     teamRating = (teamRatingSkipper + teamRatingCrew) / numCurMembers
       
-      recentRegattas = np.unique([r['raceID'].split("/")[0] + "/" + r['raceID'].split("/")[1] for p in filtered_people 
-                                                              for r in p.races[-5:]
-                                  if (datetime.today() - r['date'].to_pydatetime()).days < 14]).tolist()
-      # print(recentRegattas)
+    #   recentRegattas = np.unique([r['raceID'].split("/")[0] + "/" + r['raceID'].split("/")[1] for p in filtered_people 
+    #                                                           for r in p.races[-5:]
+    #                               if (datetime.today() - r['date'].to_pydatetime()).days < 14]).tolist()
+    #   print(team, recentRegattas)
+      recentRegattas = []
       
       topRating = 0
       topSkipperSum = 0
@@ -1038,9 +1034,10 @@ def uploadTeams(df_sailors):
       numTops = 3
       if numCurMembers > 0:
           topSkippers = sorted([p for p in filtered_people
-                                  if sum([race['cross'] for race in p.races if 'cross' in race.keys()]) > 20
-                                  and sum([race['outLinks'] for race in p.races if 'outLinks' in race.keys()]) > 70
-                                  and not set(p.seasons['skipper']).isdisjoint(targetSeasons)
+                                if validPerson(p, 'skipper')
+                                #   if sum([race['cross'] for race in p.races if 'cross' in race.keys()]) > 20
+                                #   and sum([race['outLinks'] for race in p.races if 'outLinks' in race.keys()]) > 70
+                                #   and not set(p.seasons['skipper']).isdisjoint(targetSeasons)
                                   # and sum([p['raceCount'][seas] for seas in targetSeasons if seas in p['raceCount'].keys()]) > 5
                                     ],
                               key=lambda x: x.sr.ordinal(target=targetElo, alpha=200 / model.sigma),
@@ -1049,10 +1046,10 @@ def uploadTeams(df_sailors):
                                                     for p in topSkippers[:numTops]])
           topSkippers = [{'name':p.name, 'key': p.key, 'mu': p.sr.mu, 'sigma': p.sr.sigma} for p in topSkippers]
           
-          topCrews = sorted([p for p in filtered_people
-                                  if sum([race['cross'] for race in p.races if 'cross' in race.keys()]) > 20
-                                  and sum([race['outLinks'] for race in p.races if 'outLinks' in race.keys()]) > 70
-                                  and not set(p.seasons['crew']).isdisjoint(targetSeasons)
+          topCrews = sorted([p for p in filtered_people if validPerson(p, 'crew')
+                                #   if sum([race['cross'] for race in p.races if 'cross' in race.keys()]) > 20
+                                #   and sum([race['outLinks'] for race in p.races if 'outLinks' in race.keys()]) > 70
+                                #   and not set(p.seasons['crew']).isdisjoint(targetSeasons)
                                     ], 
                               key=lambda x: x.cr.ordinal(target=targetElo, alpha=200 / model.sigma), 
                               reverse=True)
@@ -1158,6 +1155,7 @@ def uploadTeams(df_sailors):
                     'topSkippersTR': topSkippersTR[:3],
                       'topCrewsTR': topCrewsTR[:3],
                     })
+      
       predteams.append({"name": team, 
                         'link': url,
                         'topRating': topRating, 
@@ -1184,15 +1182,15 @@ def uploadTeams(df_sailors):
                                                                           'recentRegattas': recentRegattas,
                                                                           "link": url, 
                                                                           'members': members})
-      # if i > 20:
-      #     break
       if i % 20 == 0: # commit every 20 documents
               batch.commit()
               
   batch.commit()
   doc = db.collection('vars').document('eloTeams').set({"teams": teams})
+  
+  
   # doc = db.collection('vars').document('predTeams').set({"teams": predteams})
-  newTeams = sorted(teams,key=lambda x: x['topRatingTR'], reverse=True)
+  newTeams = sorted(teams,key=lambda x: x['topRating'], reverse=True)
   return newTeams
 
 def uploadTops(people):
@@ -1267,7 +1265,7 @@ if __name__ == "__main__":
   start = time.time()
   
   doScrape = False
-  doUpload = False
+  doUpload = True
   
   # df_races = pd.read_json("racesfr.json") # if running scrapers seperately
   if doScrape:
@@ -1310,11 +1308,15 @@ if __name__ == "__main__":
 
   if doScrape:
     df_sailor_info = runSailorData()
-  else: 
+  else:
     df_sailor_info = pd.read_json("sailor_data2.json")
   
   people = main(None, df_sailor_info)
   people, df_sailors = postCalcAdjust(people)
+  
+#   teams = uploadTeams(df_sailors)
+#   temp = pd.DataFrame(teams)
+#   temp.to_json("culledteams.json", index=False)
   
   if doUpload:
     uploadSailors(people)

@@ -374,8 +374,8 @@ async def main(regattas):
 def runFleetScrape():
     print("----SCRAPING FLEET RACING----")
     start = time.time()
-    seasons = [[f"f{i}",f"s{i}"] for i in range (16,25)]
-    seasons = [sub for s in seasons for sub in s] + ['s25']
+    seasons = [[f"f{i}",f"s{i}"] for i in range (16,26)]
+    seasons = [sub for s in seasons for sub in s]
     
     # seasons = ['f24']
 

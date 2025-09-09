@@ -4,3 +4,4 @@
 /pages
 /pagesTR
 .DS_Store
+*.pyc
