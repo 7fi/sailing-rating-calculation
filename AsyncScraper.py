@@ -404,7 +404,7 @@ def runFleetScrape():
             regatta_status = link.parent.next_sibling.next_sibling.next_sibling.next_sibling.next_sibling.text
             rescrape = regatta_status != 'Official'
             if (datetime.today() - datetime.strptime(regatta_date, "%m/%d/%Y")).days > 14:
-                rescrape = False 
+                rescrape = False
             if rescrape:
                 print(link['href'], regatta_date)
                 
