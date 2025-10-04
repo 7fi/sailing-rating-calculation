@@ -79,7 +79,7 @@ db = firestore.client()
 model = PlackettLuce(beta=25.0/120.0)
 targetElo = 1000
 
-targetSeasons = ['s25', 'f25']
+targetSeasons = ['f25']
 targetTRSeasons = ['s25']
 gradCutoff = 2025
 # baseSigma = baseElo // 3
@@ -462,10 +462,12 @@ def calculateFR(people, date, regatta, race, row, type, scoring, season, residua
             'regAvg': regattaAvg,
             'cross': isCross,
             'outLinks': outLinks,
-            'skipperRating': sailor.sr.ordinal(target=targetElo, alpha=200 / model.sigma),
-            'crewRating': sailor.cr.ordinal(target=targetElo, alpha=200 / model.sigma),
-            'womenSkipperRating': sailor.wsr.ordinal(target=targetElo, alpha=200 / model.sigma),
-            'womenCrewRating': sailor.wcr.ordinal(target=targetElo, alpha=200 / model.sigma),
+            'sr': sailor.sr.ordinal(target=targetElo, alpha=200 / model.sigma),
+            'srmu': sailor.sr.mu,
+            'srsig': sailor.sr.sigma,
+            'cr': sailor.cr.ordinal(target=targetElo, alpha=200 / model.sigma),
+            'wsr': sailor.wsr.ordinal(target=targetElo, alpha=200 / model.sigma),
+            'wcr': sailor.wcr.ordinal(target=targetElo, alpha=200 / model.sigma),
             'tsr': sailor.tsr.ordinal(target=targetElo, alpha=200 / model.sigma),
             'tcr': sailor.tcr.ordinal(target=targetElo, alpha=200 / model.sigma),
             'wtsr': sailor.wtsr.ordinal(target=targetElo, alpha=200 / model.sigma),
@@ -944,7 +946,8 @@ def uploadSailors(people):
 
     # eligible = [p for p in people.values() if 'team' in [r['type'] for r in p.races]]
 
-#   eligible = [people['elliott-chalcraft']]
+    # eligible = [people['carter-anderson']]
+    # eligible = [people['charles-wilkinson']]
     print(len(eligible))
 
     # Iterate over the people values
@@ -961,10 +964,10 @@ def uploadSailors(people):
                 "key": p.key.replace("/", "-"),
                 'gender': p.gender,
                 "Teams": p.teams.tolist() if isinstance(p.teams, np.ndarray) else p.teams,
-                "SkipperRating": int(p.sr.ordinal(target=targetElo, alpha=200 / model.sigma)),
-                "CrewRating": int(p.cr.ordinal(target=targetElo, alpha=200 / model.sigma)),
-                "WomenSkipperRating": int(p.wsr.ordinal(target=targetElo, alpha=200 / model.sigma)),
-                "WomenCrewRating": int(p.wcr.ordinal(target=targetElo, alpha=200 / model.sigma)),
+                "sr": int(p.sr.ordinal(target=targetElo, alpha=200 / model.sigma)),
+                "cr": int(p.cr.ordinal(target=targetElo, alpha=200 / model.sigma)),
+                "wsr": int(p.wsr.ordinal(target=targetElo, alpha=200 / model.sigma)),
+                "wcr": int(p.wcr.ordinal(target=targetElo, alpha=200 / model.sigma)),
                 "tsr": int(p.tsr.ordinal(target=targetElo, alpha=200 / model.sigma)),
                 "tcr": int(p.tcr.ordinal(target=targetElo, alpha=200 / model.sigma)),
                 "wtsr": int(p.wtsr.ordinal(target=targetElo, alpha=200 / model.sigma)),
@@ -1417,7 +1420,7 @@ def uploadAllSailors(people):
 if __name__ == "__main__":
     start = time.time()
 
-    doScrape = True
+    doScrape = False
     doUpload = True
 
     if doScrape:
@@ -1481,9 +1484,9 @@ if __name__ == "__main__":
 
     if doUpload:
         uploadSailors(people)
-        # teams = uploadTeams(df_sailors)
-        # uploadTops(people)
-        # uploadAllSailors(people)
+        teams = uploadTeams(df_sailors)
+        uploadTops(people)
+        uploadAllSailors(people)
 
     end = time.time() 
     print(f"{int((end-start) // 60)}:{int((end-start) % 60)}")
