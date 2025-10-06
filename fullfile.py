@@ -79,7 +79,7 @@ db = firestore.client()
 model = PlackettLuce(beta=25.0/120.0)
 targetElo = 1000
 
-targetSeasons = ['s25', 'f25']
+targetSeasons = ['f25']
 targetTRSeasons = ['s25']
 gradCutoff = 2025
 # baseSigma = baseElo // 3
@@ -1417,7 +1417,8 @@ def uploadAllSailors(people):
 if __name__ == "__main__":
     start = time.time()
 
-    doScrape = True
+    doScrape = False
+    doCalc = True
     doUpload = True
 
     if doScrape:
@@ -1476,14 +1477,15 @@ if __name__ == "__main__":
     else:
         df_sailor_info = pd.read_json("sailor_data2.json")
 
-    people = main(df_sailor_ratings, df_sailor_info)
-    people, df_sailors = postCalcAdjust(people)
+    if doCalc:
+        people = main(df_sailor_ratings, df_sailor_info)
+        people, df_sailors = postCalcAdjust(people)
 
     if doUpload:
         uploadSailors(people)
-        # teams = uploadTeams(df_sailors)
-        # uploadTops(people)
-        # uploadAllSailors(people)
+        teams = uploadTeams(df_sailors)
+        uploadTops(people)
+        uploadAllSailors(people)
 
     end = time.time() 
     print(f"{int((end-start) // 60)}:{int((end-start) % 60)}")

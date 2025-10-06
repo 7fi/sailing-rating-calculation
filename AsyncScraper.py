@@ -382,7 +382,7 @@ def runFleetScrape():
     df_races = pd.DataFrame()
     try:
         print("attempting to read from file")
-        df_races = pd.read_json("racesfr.json") 
+        df_races = pd.read_json("racesfr-20251004.json") 
         print("read from file")
     except:
         df_races = pd.DataFrame(columns=["Score", "Div", "Sailor","Link", "GradYear", "Position", "Partner", "Venue", "Regatta", "Scoring", "raceID", "Date", "Team", "Teamlink"]) 
@@ -405,15 +405,17 @@ def runFleetScrape():
             rescrape = regatta_status != 'Official'
             if (datetime.today() - datetime.strptime(regatta_date, "%m/%d/%Y")).days > 14:
                 rescrape = False
-            if rescrape:
-                print(link['href'], regatta_date)
-                
+            
             scrape = (season + "/" + link['href']) not in racesRegattas or rescrape
             
+            if scrape:
+                print(link['href'], regatta_date)
+                
+            
             if (scoring == "3 Divisions" or scoring == "2 Divisions" or scoring == "Combined") and scrape:
-                regattas[season + "/" + link['href']] = {"link":season + "/" + link['href'], "scoring":scoring, 'rescrape': rescrape, 'date': regatta_date}
+                regattas[season + "/" + link['href']] = {"link":season + "/" + link['href'], "scoring":scoring, 'rescrape': True, 'date': regatta_date}
 
-    # regattas = {'s24/st-francis-invite':{'link':'s24/st-francis-invite','scoring':'2 Divisions'}}
+    # regattas = {'f25/open-atlantic-coast-round-1b':{'link':'f25/open-atlantic-coast-round-1b','scoring':'2 Divisions'}}
 
     if len(regattas.values()) > 0:
         totalRows = asyncio.run(main(regattas))
@@ -432,5 +434,5 @@ def runFleetScrape():
     print(f"{int((end-start) // 60)}:{int((end-start) % 60)}")
     return df_races
 
-# if __name__ == "__main__":
-#     runFleetScrape()
+if __name__ == "__main__":
+    runFleetScrape()
