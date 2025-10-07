@@ -938,15 +938,15 @@ def uploadSailors(people):
     batch_size = 30
     today = datetime.today()
 
-    eligible = [p for p in people.values() if (targetSeasons[-1] in p.seasons['skipper']
-                                               or targetSeasons[-1] in p.seasons['crew'])
-                and len(p.races) > 0
-                and type(p.races[-1]['date']) != type("hi")
-                and (today - p.races[-1]['date']).days < 14]
+    # eligible = [p for p in people.values() if (targetSeasons[-1] in p.seasons['skipper']
+    #                                            or targetSeasons[-1] in p.seasons['crew'])
+    #             and len(p.races) > 0
+    #             and type(p.races[-1]['date']) != type("hi")
+    #             and (today - p.races[-1]['date']).days < 14]
 
     # eligible = [p for p in people.values() if 'team' in [r['type'] for r in p.races]]
 
-    # eligible = [people['carter-anderson']]
+    eligible = [people['carter-anderson']]
     # eligible = [people['charles-wilkinson']]
     print(len(eligible))
 
@@ -1411,7 +1411,7 @@ def uploadTops(people):
 
 def uploadAllSailors(people):
     flattened_dict = {p.key: {'team': p.teams[-1], 'year': p.year, 'name': p.name}
-                      for p in people.values() if 's25' in p.seasons['skipper'] or 's25' in p.seasons['crew']}
+                      for p in people.values() if 's25' in p.seasons['skipper'] or 's25' in p.seasons['crew'] or 'f25' in p.seasons['skipper'] or 'f25' in p.seasons['crew']}
     # print(flattened_dict)
     db.collection('vars').document('allSailors').set(
         {'allSailors': json.dumps(flattened_dict, separators=(',', ':'))})
@@ -1483,9 +1483,9 @@ if __name__ == "__main__":
     people, df_sailors = postCalcAdjust(people)
 
     if doUpload:
-        uploadSailors(people)
-        teams = uploadTeams(df_sailors)
-        uploadTops(people)
+        # uploadSailors(people)
+        # teams = uploadTeams(df_sailors)
+        # uploadTops(people)
         uploadAllSailors(people)
 
     end = time.time() 
