@@ -1,4 +1,4 @@
-from bs4 import BeautifulSoup
+from bs4 import BeautifulSoup, NavigableString
 import requests
 import httpx
 import asyncio
@@ -179,14 +179,23 @@ def processData(soup):
     for i in range(1, teamCount + 1):
         teamHome = scoreData[(i*(numDivisions + 1)) - (numDivisions + 1)].find('a').text
         teamName = scoreData[(i*(numDivisions + 1)) - (numDivisions + 1) + 1].contents[2].text
+        if (numDivisions == 1):
+            teamName = [t for t in scoreData[(i*(numDivisions + 1)) - (numDivisions + 1)].contents[2] if isinstance(t, NavigableString)][0]
+            
         teamLink = scoreData[(i*(numDivisions + 1)) - (numDivisions + 1)].find('a')['href']
         teamScores = {'A': [], 'B': [], 'C':[]}
 
-        teamScores["A"] = [parseScore(scoreData[(i*(numDivisions + 1)) - (numDivisions + 1)].contents[j]) for j in range(4, (4 + raceCount))]
+        offset = 3 if numDivisions == 1 else 4
+
+        teamScores["A"] = [parseScore(scoreData[(i*(numDivisions + 1)) - (numDivisions + 1)].contents[j]) 
+                            for j in range(offset, (offset + raceCount))]
+            
         if numDivisions > 1:
-            teamScores["B"] = [parseScore(scoreData[(i*(numDivisions + 1)) - (numDivisions + 1) + 1].contents[j]) for j in range(4, (4 + raceCount))]
+            teamScores["B"] = [parseScore(scoreData[(i*(numDivisions + 1)) - (numDivisions + 1) + 1].contents[j]) 
+                                for j in range(offset, (offset + raceCount))]
         if numDivisions > 2:
-            teamScores["C"] = [parseScore(scoreData[(i*(numDivisions + 1)) - (numDivisions + 1) + 2].contents[j]) for j in range(4, (4 + raceCount))]
+            teamScores["C"] = [parseScore(scoreData[(i*(numDivisions + 1)) - (numDivisions + 1) + 2].contents[j]) 
+                                for j in range(offset, (offset + raceCount))]
 
         # teamNameEls = [i.parent for i in sailors.find_all('a') if i['href'] == teamLink] # this actually doesnt work because what if teams have two boats...
         teamNameEls = [i for i in sailors.find_all('td', class_="teamname") if i.text == teamName and i.previous_sibling.find('a')['href'] == teamLink]
@@ -377,7 +386,7 @@ def runFleetScrape():
     seasons = [[f"f{i}",f"s{i}"] for i in range (16,26)]
     seasons = [sub for s in seasons for sub in s]
     
-    # seasons = ['f24']
+    seasons = ['f25']
 
     df_races = pd.DataFrame()
     try:
@@ -399,6 +408,7 @@ def runFleetScrape():
         tbody = listSoup.find('table', class_="season-summary").find('tbody')
         
         for link in tbody.find_all("a", href=True):
+            regatta = season + "/" + link['href']
             scoring = link.parent.next_sibling.next_sibling.next_sibling.text
             regatta_date = link.parent.next_sibling.next_sibling.next_sibling.next_sibling.text
             regatta_status = link.parent.next_sibling.next_sibling.next_sibling.next_sibling.next_sibling.text
@@ -406,16 +416,14 @@ def runFleetScrape():
             if (datetime.today() - datetime.strptime(regatta_date, "%m/%d/%Y")).days > 14:
                 rescrape = False
             
-            scrape = (season + "/" + link['href']) not in racesRegattas or rescrape
-            
+            goodScoring = scoring in ['3 Divisions', '2 Divisions', '1 Division', 'Combined']
+            scrape = (regatta not in racesRegattas or rescrape) and goodScoring
+                
             if scrape:
                 print(link['href'], regatta_date)
-                
-            
-            if (scoring == "3 Divisions" or scoring == "2 Divisions" or scoring == "Combined") and scrape:
-                regattas[season + "/" + link['href']] = {"link":season + "/" + link['href'], "scoring":scoring, 'rescrape': True, 'date': regatta_date}
+                regattas[regatta] = {"link":regatta, "scoring":scoring, 'rescrape': rescrape, 'date': regatta_date}
 
-    # regattas = {'f25/open-atlantic-coast-round-1b':{'link':'f25/open-atlantic-coast-round-1b','scoring':'2 Divisions'}}
+    # regattas = {'f25/saisa-match-race-championships':{'link':'f25/saisa-match-race-championships','scoring':'1 Division', 'rescrape': True, 'date': '09/07/2025'}}
 
     if len(regattas.values()) > 0:
         totalRows = asyncio.run(main(regattas))
@@ -423,7 +431,7 @@ def runFleetScrape():
         df_races = pd.concat([df_races, pd.DataFrame(totalRows)])
         df_races = df_races.drop_duplicates(subset=['raceID', 'Sailor'], keep='last').reset_index(drop=True)
         df_races.to_json(f"racesfr.json", index=False, date_format='iso')
-        df_races.to_json(f"racesfr-{date.today().strftime("%Y%m%d")}.json", index=False, date_format='iso')
+        # df_races.to_json(f"racesfr-{date.today().strftime("%Y%m%d")}.json", index=False, date_format='iso')
         if len(totalRows) > 0:
             df_races_new = pd.DataFrame(totalRows)
             df_races_new.to_json("races_new_fr.json", index=False)

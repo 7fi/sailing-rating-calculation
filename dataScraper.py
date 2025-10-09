@@ -166,5 +166,5 @@ def runSailorData():
     return df_people_final
 
 
-# if __name__ == "__main__":
-#     runSailorData()
+if __name__ == "__main__":
+    runSailorData()
