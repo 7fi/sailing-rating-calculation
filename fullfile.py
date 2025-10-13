@@ -1484,9 +1484,9 @@ if __name__ == "__main__":
 
     if doUpload:
         uploadSailors(people)
-        # teams = uploadTeams(df_sailors)
-        # uploadTops(people)
-        # uploadAllSailors(people)
+        teams = uploadTeams(df_sailors)
+        uploadTops(people)
+        uploadAllSailors(people)
 
     end = time.time() 
     print(f"{int((end-start) // 60)}:{int((end-start) % 60)}")
