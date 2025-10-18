@@ -22,7 +22,7 @@ def getRaceNums(oldNums, scoresLen):
                 newNums.append(int(num[0]))
     return newNums
 
-def makeRaceSeries(score, team, raceNum, division, name, link, gradYear, position, partner, partnerLink, venue, regatta, date, teamlink, scoring):
+def makeRaceSeries(score, team, raceNum, division, name, link, gradYear, position, partner, partnerLink, venue, regatta, date, teamlink, scoring, boat):
     raceSeries = pd.Series()
     raceSeries["Score"] = score
     raceSeries["Div"] = division
@@ -39,6 +39,7 @@ def makeRaceSeries(score, team, raceNum, division, name, link, gradYear, positio
     raceSeries["Date"] = date
     raceSeries["Team"] = team
     raceSeries["Teamlink"] = teamlink
+    raceSeries["Boat"] = boat
     return raceSeries
 
 async def cleanup_semaphore(semaphore):
@@ -149,6 +150,10 @@ def processData(soup):
     if len(fullScores.find_all('table', class_="results")) == 0: 
         print(f"no scores entered for {regatta}, skipping")
         return
+    
+    page_keys = fullScores.find_all('span',class_='page-info-key')
+    boat_key = [key for key in page_keys if 'Boat' in key.text][0]
+    boat_type = boat_key.next_sibling.text
     
     scoreData = fullScores.find_all('table', class_="results")[
         0].contents[1].contents
@@ -304,7 +309,7 @@ def processData(soup):
                 if i + 1 in skipper['races']:
                     partner = partners[skipper['races'].index(i + 1)] if skipper['races'].index(i + 1) < len(partners) else "Unknown"
                     partnerLink = partnerLinks[skipper['races'].index(i + 1)] if skipper['races'].index(i + 1) < len(partners) else "Unknown"
-                    finalRaces.append(makeRaceSeries(score, teamHome, i + 1, skipper['div'], skipper['name'], skipper['link'],skipper['year'], "Skipper", partner, partnerLink, host,regatta, date, teamLink, scoring))
+                    finalRaces.append(makeRaceSeries(score, teamHome, i + 1, skipper['div'], skipper['name'], skipper['link'],skipper['year'], "Skipper", partner, partnerLink, host,regatta, date, teamLink, scoring, boat_type))
         
         for crew in crews:
             partners = [skipper['name'] for race in crew['races'] for skipper in skippers if skipper['div'] == crew['div'] and race in skipper['races']]
@@ -314,7 +319,7 @@ def processData(soup):
                 if i + 1 in crew['races']:
                     partner = partners[crew['races'].index(i + 1)] if crew['races'].index(i + 1) < len(partners) else "Unknown"
                     partnerLink = partnerLinks[crew['races'].index(i + 1)] if crew['races'].index(i + 1) < len(partners) else "Unknown"
-                    finalRaces.append(makeRaceSeries(score, teamHome, i + 1, crew['div'], crew['name'],crew['link'], crew['year'], "Crew", partner, partnerLink, host,regatta, date, teamLink, scoring))
+                    finalRaces.append(makeRaceSeries(score, teamHome, i + 1, crew['div'], crew['name'],crew['link'], crew['year'], "Crew", partner, partnerLink, host,regatta, date, teamLink, scoring, boat_type))
 
         skippers = []
         crews = []
@@ -379,13 +384,13 @@ def runFleetScrape():
     
     # seasons = ['f24']
 
-    df_races = pd.DataFrame()
-    try:
-        print("attempting to read from file")
-        df_races = pd.read_json("racesfr.json") 
-        print("read from file")
-    except:
-        df_races = pd.DataFrame(columns=["Score", "Div", "Sailor","Link", "GradYear", "Position", "Partner", "Venue", "Regatta", "Scoring", "raceID", "Date", "Team", "Teamlink"]) 
+    # df_races = pd.DataFrame()
+    # try:
+    #     print("attempting to read from file")
+    #     df_races = pd.read_json("racesfr.json") 
+    #     print("read from file")
+    # except:
+    df_races = pd.DataFrame(columns=["Score", "Div", "Sailor","Link", "GradYear", "Position", "Partner", "Venue", "Regatta", "Scoring", "raceID", "Date", "Team", "Teamlink"]) 
 
     racesRegattas = df_races['Regatta'].unique()
     
@@ -432,5 +437,5 @@ def runFleetScrape():
     print(f"{int((end-start) // 60)}:{int((end-start) % 60)}")
     return df_races
 
-# if __name__ == "__main__":
-#     runFleetScrape()
+if __name__ == "__main__":
+    runFleetScrape()
