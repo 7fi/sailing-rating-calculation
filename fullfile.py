@@ -93,7 +93,8 @@ merges = {'carter-anderson-2027': 'carter-anderson',
           'connor-nelson-2024': 'connor-nelson', 
           'Gavin Hudson-Northeastern': 'gavin-hudson', 
           'Jeremy Bullock-Northeastern': 'jeremy-bullock',
-          'Emma Cole-Northeastern': 'emma-cole'}
+          'Emma Cole-Northeastern': 'emma-cole', 
+          'emma-cole-2026': 'emma-cole',}
 
 
 def setupPeople(df_sailor_ratings, df_sailor_info):
@@ -1418,9 +1419,9 @@ def uploadAllSailors(people):
 if __name__ == "__main__":
     start = time.time()
 
-    doScrape = False
-    doCalc = True
-    doUpload = True
+    doScrape = True
+    doCalc = False
+    doUpload = False
 
     if doScrape:
         df_races = runFleetScrape()
