@@ -8,9 +8,9 @@ from datetime import datetime, timedelta, date
 import requests
 from bs4 import BeautifulSoup
 from collections import defaultdict
-from AsyncScraper import runFleetScrape
-from dataScraper import runSailorData
-from TRScraper import scrapeTR
+from refactor.AsyncScraper import runFleetScrape
+from refactor.dataScraper import runSailorData
+from refactor.TRScraper import scrapeTR
 import json
 import time
 
@@ -60,7 +60,7 @@ class Sailor:
         self.avgCrewRatio = 0
 
     def hasTargetSeasons(self, targetSeasons, pos):
-        return not set(self.seasons[pos]).isdisjoint(targetSeasons)
+        return not set([s[0] for s in self.seasons[pos]]).isdisjoint(targetSeasons)
 
     def __repr__(self):
         return f"{self.name}: {self.teams}, {str(self.sr.ordinal(target=targetElo, alpha=200/model.sigma))} {str(self.cr.ordinal(target=targetElo, alpha=200/model.sigma))} {self.seasons} {len(self.races)}"
@@ -74,7 +74,8 @@ def adjust_race_id(row):
 
 
 cred = credentials.Certificate("thecrowsnestapp-creds.json")
-firebase_admin.initialize_app(cred)
+# firebase_admin.initialize_app(cred)
+db = firestore.client()
 
 # Create a connection
 connection = mysql.connector.connect(
@@ -87,7 +88,6 @@ connection = mysql.connector.connect(
 
 cursor = connection.cursor()
 
-db = firestore.client()
 model = PlackettLuce(beta=25.0/120.0)
 targetElo = 1000
 
@@ -105,7 +105,8 @@ merges = {'carter-anderson-2027': 'carter-anderson',
           'connor-nelson-2024': 'connor-nelson', 
           'Gavin Hudson-Northeastern': 'gavin-hudson', 
           'Jeremy Bullock-Northeastern': 'jeremy-bullock',
-          'Emma Cole-Northeastern': 'emma-cole'}
+          'Emma Cole-Northeastern': 'emma-cole', 
+          'Nathalie Caudron-Northeastern': 'nathalie-caudron'}
 
 
 def setupPeople(df_sailor_ratings, df_sailor_info, df_races_full):
@@ -178,7 +179,7 @@ def validPerson(p, type):
             and p.outLinks > 70
             # if sum([race['cross'] for race in p.races if 'cross' in race.keys()]) > 20
             # and sum([race['outLinks'] for race in p.races if 'outLinks' in race.keys()]) > 70
-            and not set(p.seasons[type]).isdisjoint(targetSeasons)
+            and not p.hasTargetSeasons(targetSeasons, type)
             # and (2000 + int(p.year.split()[0]) > gradCutoff if isinstance(p.year, str) and len(p.year.split()) > 1 else int(p.year) > gradCutoff)
             # and sum([p['raceCount'][seas] for seas in targetSeasons if seas in p['raceCount'].keys()]) > 5
             )
@@ -186,8 +187,7 @@ def validPerson(p, type):
 
 def getTeamRatings(people, team, targetSeasons):
     filtered_people = [p for p in people.values() if team in p.teams]
-    current = [p for p in filtered_people if not set(p.seasons['skipper']).isdisjoint(
-        targetSeasons) or not set(p.seasons['crew']).isdisjoint(targetSeasons)]
+    current = [p for p in filtered_people if not p.hasTargetSeasons(targetSeasons, 'skipper') or not p.hasTargetSeasons(targetSeasons, 'crew')]
 
     numTops = 3
     if len(current) > 0:
@@ -243,7 +243,7 @@ def getTeamRatings(people, team, targetSeasons):
 
         topSkippersTR = sorted([p for p in filtered_people
                                 if p.tsr.mu != model.mu
-                                if not set(p.seasons['skipper']).isdisjoint(targetSeasons)],
+                                if not p.hasTargetSeasons(targetSeasons, 'skipper')],
                                key=lambda x: x.tsr.ordinal(
                                    target=targetElo, alpha=200 / model.sigma),
                                reverse=True)
@@ -254,7 +254,7 @@ def getTeamRatings(people, team, targetSeasons):
 
         topCrewsTR = sorted([p for p in filtered_people
                              if p.tcr.mu != model.mu
-                             if not set(p.seasons['crew']).isdisjoint(targetSeasons)],
+                             if not p.hasTargetSeasons(targetSeasons, 'crew')],
                             key=lambda x: x.tcr.ordinal(
                                 target=targetElo, alpha=200 / model.sigma),
                             reverse=True)
@@ -269,7 +269,7 @@ def getTeamRatings(people, team, targetSeasons):
         topWomenSkippersTR = sorted([p for p in filtered_people
                                      if p.wtsr.mu != model.mu
                                      and p.gender == 'F'
-                                     and not set(p.seasons['skipper']).isdisjoint(targetSeasons)],
+                                     and not p.hasTargetSeasons(targetSeasons, 'skipper')],
                                     key=lambda x: x.wtsr.ordinal(
                                         target=targetElo, alpha=200 / model.sigma),
                                     reverse=True)
@@ -281,7 +281,7 @@ def getTeamRatings(people, team, targetSeasons):
         topWomenCrewsTR = sorted([p for p in filtered_people
                                   if p.wtcr.mu != model.mu
                                   and p.gender == 'F'
-                                  and not set(p.seasons['crew']).isdisjoint(targetSeasons)],
+                                  and not p.hasTargetSeasons(targetSeasons, 'crew')],
                                  key=lambda x: x.wtcr.ordinal(
                                      target=targetElo, alpha=200 / model.sigma),
                                  reverse=True)
@@ -334,7 +334,7 @@ def calculateFR(people, date, regatta, race, row, type, scoring, season, residua
     # Grab lists for each datapoint
     keys = scores['key']  # the sailor keys
     names = scores['Sailor']  # the sailor names
-    teams = scores['Team']  # the sailor names
+    teams = scores['Team']  # the sailors team
     scoreVals = list(scores['Score'])  # the score values
 
     # check for invalid race conditions
@@ -420,7 +420,7 @@ def calculateFR(people, date, regatta, race, row, type, scoring, season, residua
     doCr = race.split("/")[0] in targetSeasons and isCross == 1
 
     # Loop through each sailor and the associated values
-    for sailor, score, pred, change, partnerKey, partnerName in zip(racers, scoreVals, predictions, changes, partnerKeys, partnerNames):
+    for sailor, score, pred, change, partnerKey, partnerName, oldRating, new_rating, team in zip(racers, scoreVals, predictions, changes, partnerKeys, partnerNames, startingRating, ratings, teams):
         outLinks = 0
 
         partnerKey = partnerKey if partnerKey not in merges.keys(
@@ -438,9 +438,10 @@ def calculateFR(people, date, regatta, race, row, type, scoring, season, residua
             sailor.outLinks += outLinks
 
         # update sailor's seasons
-        if season not in sailor.seasons[type.lower()]:
-            sailor.seasons[type.lower()] = np.append(
-                sailor.seasons[type.lower()], season)
+        if season not in [s[0] for s in sailor.seasons[type.lower()]]:
+            sailor.seasons[type.lower()].append((season, team))
+            if(sailor.key == 'carter-anderson'):
+                print(sailor.seasons)
 
         # calculate rivals
         for other, otherScore in zip(racers, scoreVals):
@@ -461,6 +462,7 @@ def calculateFR(people, date, regatta, race, row, type, scoring, season, residua
                 if otherScore > score:
                     sailor.rivals[type][other.key]['wins'][season] += 1
 
+        ratingType = 'wsr' if womens else 'sr' if type == 'Skipper' else 'wcr' if womens else 'cr'
         # add race to each sailor's score
         sailor.races.append({
             # Need to rewrite to include DNF and such (correctly evaluating score but its hard to tell )
@@ -476,13 +478,9 @@ def calculateFR(people, date, regatta, race, row, type, scoring, season, residua
             'sr': sailor.sr.ordinal(target=targetElo, alpha=200 / model.sigma),
             'srmu': sailor.sr.mu,
             'srsig': sailor.sr.sigma,
-            'cr': sailor.cr.ordinal(target=targetElo, alpha=200 / model.sigma),
-            'wsr': sailor.wsr.ordinal(target=targetElo, alpha=200 / model.sigma),
-            'wcr': sailor.wcr.ordinal(target=targetElo, alpha=200 / model.sigma),
-            'tsr': sailor.tsr.ordinal(target=targetElo, alpha=200 / model.sigma),
-            'tcr': sailor.tcr.ordinal(target=targetElo, alpha=200 / model.sigma),
-            'wtsr': sailor.wtsr.ordinal(target=targetElo, alpha=200 / model.sigma),
-            'wtcr': sailor.wtcr.ordinal(target=targetElo, alpha=200 / model.sigma),
+            'ratingType': ratingType,
+            'oldRating': oldRating,
+            'newRating': new_rating[0].ordinal(target=targetElo, alpha=200 / model.sigma),
             'womens': womens,
             'date': date,
             'partner': {'name': partnerName, 'key': partnerKey},
@@ -550,9 +548,6 @@ def calculateTR(people, date, regatta, race, row, type, scoring, season, regatta
         for racer, new_rating in zip(team, newRatings):
             # print(new_rating.ordinal(target=targetElo, alpha=200 / model.sigma))
             # racer.teams = [name]
-            if row['raceID'].iat[0].split("/")[0] not in racer.seasons[type.lower()]:
-                np.append(racer.seasons[type.lower()], [
-                          row['raceID'].iat[0].split("/")[0]])
             if type == 'Skipper':
                 if womens:
                     racer.wtsr = new_rating
@@ -586,7 +581,7 @@ def calculateTR(people, date, regatta, race, row, type, scoring, season, regatta
     AChanges = [e-s for s, e in zip(startingARating, endingARatings)]
     BChanges = [e-s for s, e in zip(startingBRating, endingBRatings)]
 
-    for tscore, toutcome, oppt, oppn, index, racers, oppRacers, changes, boats in zip(
+    for tscore, toutcome, oppt, oppn, index, racers, oppRacers, changes, boats, starting, new_ratings, teamName in zip(
         [row['teamAScore'].iat[0], row['teamBScore'].iat[0]],
         [row['teamAOutcome'].iat[0],
          row['teamBOutcome'].iat[0]],
@@ -598,7 +593,9 @@ def calculateTR(people, date, regatta, race, row, type, scoring, season, regatta
         [teamARacers, teamBRacers],
         [teamBRacers, teamARacers],
         [AChanges, BChanges],
-            [row['teamABoats'].iat[0], row['teamBBoats'].iat[0]]):
+        [row['teamABoats'].iat[0], row['teamBBoats'].iat[0]], 
+        [startingARating, startingBRating], 
+        [endingARatings, endingBRatings], [teamAName, teamBName]):
 
         partnerKeys = [boat['crewKey'] if boat['crewKey']
                        is not None else 'Unknown' for boat in boats]
@@ -610,7 +607,7 @@ def calculateTR(people, date, regatta, race, row, type, scoring, season, regatta
             partnerNames = [boat['skipperName'] if boat['skipperName']
                             is not None else 'Unknown' for boat in boats]
 
-        for racer, change, partnerKey, partnerName in zip(racers, changes, partnerKeys, partnerNames):
+        for racer, change, partnerKey, partnerName, oldRating, new_rating in zip(racers, changes, partnerKeys, partnerNames, starting, new_ratings):
 
             partnerKey = partnerKey if partnerKey not in merges.keys(
             ) else merges[partnerKey]
@@ -634,10 +631,10 @@ def calculateTR(people, date, regatta, race, row, type, scoring, season, regatta
                     racer.rivals[type][opp.key]['wins'][season] += 1
 
             # Make sure seasons are updated
-            if season not in racer.seasons[type.lower()]:
-                racer.seasons[type.lower()] = np.append(
-                    racer.seasons[type.lower()], season)
+            if season not in [s[0] for s  in racer.seasons[type.lower()]]:
+                racer.seasons[type.lower()].append((season, teamName))
 
+            ratingType = 'wtsr' if womens else 'tsr' if type == 'Skipper' else 'wtcr' if womens else 'tcr'
             racer.races.append({'raceID': row['raceID'].iat[0], 'raceNum': int(row['raceNum'].iat[0]), 'round':  row['round'].iat[0],
                                 'pos': type,
                                 'date': date,
@@ -647,15 +644,10 @@ def calculateTR(people, date, regatta, race, row, type, scoring, season, regatta
                                 'opponentNick': oppn,
                                 'score': tscore,
                                 'outcome': toutcome,
+                                'ratingType': ratingType,
+                                'oldRating': oldRating,
+                                'newRating': new_rating,
                                 'predicted': 'win' if predictions[index][0] == 1 else 'lose',
-                                'skipperRating': racer.sr.ordinal(target=targetElo, alpha=200 / model.sigma),
-                                'crewRating': racer.cr.ordinal(target=targetElo, alpha=200 / model.sigma),
-                                'womenSkipperRating': racer.wsr.ordinal(target=targetElo, alpha=200 / model.sigma),
-                                'womenCrewRating': racer.wcr.ordinal(target=targetElo, alpha=200 / model.sigma),
-                                'tsr': racer.tsr.ordinal(target=targetElo, alpha=200 / model.sigma),
-                                'tcr': racer.tcr.ordinal(target=targetElo, alpha=200 / model.sigma),
-                                'wtsr': racer.wtsr.ordinal(target=targetElo, alpha=200 / model.sigma),
-                                'wtcr': racer.wtcr.ordinal(target=targetElo, alpha=200 / model.sigma),
                                 'regAvg': regattaAvg,
                                 'change': float(change),
                                 'venue': venue,
@@ -816,21 +808,21 @@ def calculateDateRanks(dateRanks):
 def postCalcAdjust(people, df_races_full):
     # Filter sailors who have 'f24' in their seasons list
     eligible_skippers = [p for p in people.values()
-                         if not set(p.seasons['skipper']).isdisjoint(targetSeasons)
+                         if not p.hasTargetSeasons(targetSeasons, 'skipper')
                          and sum([race['outLinks'] for race in p.races if 'outLinks' in race.keys()]) > 70 
                          and (2000 + int(p.year.split()[0]) > gradCutoff if isinstance(p.year, str) and len(p.year.split()) > 1 else int(p.year) > gradCutoff)]
 
     eligible_crews = [p for p in people.values()
-                      if not set(p.seasons['crew']).isdisjoint(targetSeasons)
+                      if not p.hasTargetSeasons(targetSeasons, 'crew')
                       and sum([race['outLinks'] for race in p.races if 'outLinks' in race.keys()]) > 70
                       and (2000 + int(p.year.split()[0]) > gradCutoff if isinstance(p.year, str) and len(p.year.split()) > 1 else int(p.year) > gradCutoff)]
 
     # TODO: Count tr and fr seasons seperately
     eligible_skippers_tr = [p for p in people.values()
-                            if not set(p.seasons['skipper']).isdisjoint(targetTRSeasons)
+                            if not p.hasTargetSeasons(targetSeasons, 'skipper')
                             and (2000 + int(p.year.split()[0]) > gradCutoff if isinstance(p.year, str) and len(p.year.split()) > 1 else int(p.year) > gradCutoff)]
     eligible_crews_tr = [p for p in people.values()
-                         if not set(p.seasons['crew']).isdisjoint(targetTRSeasons)
+                         if not p.hasTargetSeasons(targetSeasons, 'crew')
                          and (2000 + int(p.year.split()[0]) > gradCutoff if isinstance(p.year, str) and len(p.year.split()) > 1 else int(p.year) > gradCutoff)]
 
     for p in people.values():
@@ -943,130 +935,163 @@ def postCalcAdjust(people, df_races_full):
     return people, df_sailors, df_races_full
 
 
-def uploadSailors(people, cursor):
-    # Initialize Firestore client
-    col = db.collection('eloSailors')
+def getCounts(races):
+        # season_counts = defaultdict(int)
+        season_counts = {}
 
-    # Initialize the batch
-    batch = db.batch()
+        for race in races:
+            season = race["raceID"].split("/")[0]
+            if season not in season_counts.keys():
+                season_counts[season] = {}
+            if race['pos'] not in season_counts[season].keys():
+                season_counts[season][race['pos']] = 0
+            season_counts[season][race['pos']] += 1
 
-    # Number of documents to commit in each batch
-    batch_size = 30
-    today = datetime.today()
+        return dict(season_counts)
 
+
+def uploadSailors(people, cursor, connection, batch_size=300):
+    
     # eligible = [p for p in people.values() if (targetSeasons[-1] in p.seasons['skipper']
     #                                            or targetSeasons[-1] in p.seasons['crew'])
     #             and len(p.races) > 0
     #             and type(p.races[-1]['date']) != type("hi")
     #             and (today - p.races[-1]['date']).days < 14]
-
-    eligible = [p for p in people.values()]
-
-    # eligible = [people['carter-anderson']]
-    # eligible = [people['charles-wilkinson']]
+    eligible = list(people.values())
     print(len(eligible))
 
-    # Iterate over the people values
-    # for i, p in enumerate(people.values()):
+    sailor_rows = []
+    rival_rows = []
+    sailor_teams_rows = []
+
     for i, p in enumerate(eligible):
-        if p.key is None: 
+        if p.key is None:
             print("No key for", p.name)
             continue
+
+        avg_sk = 0 if p.avgSkipperRatio is None or np.isnan(p.avgSkipperRatio) else p.avgSkipperRatio
+        avg_cr = 0 if p.avgCrewRatio is None or np.isnan(p.avgCrewRatio) else p.avgCrewRatio
+
+        sailor_rows.append((
+            p.key.replace("/", "-"),
+            p.name,
+            p.gender,
+            int(p.sr.ordinal(target=targetElo, alpha=200 / model.sigma)),
+            int(p.cr.ordinal(target=targetElo, alpha=200 / model.sigma)),
+            int(p.wsr.ordinal(target=targetElo, alpha=200 / model.sigma)),
+            int(p.wcr.ordinal(target=targetElo, alpha=200 / model.sigma)),
+            int(p.tsr.ordinal(target=targetElo, alpha=200 / model.sigma)),
+            int(p.tcr.ordinal(target=targetElo, alpha=200 / model.sigma)),
+            int(p.wtsr.ordinal(target=targetElo, alpha=200 / model.sigma)),
+            int(p.wtcr.ordinal(target=targetElo, alpha=200 / model.sigma)),
+            int(p.skipperRank),
+            int(p.crewRank),
+            int(p.womenSkipperRank),
+            int(p.womenCrewRank),
+            int(p.skipperRankTR),
+            int(p.crewRankTR),
+            int(p.womenSkipperRankTR),
+            int(p.womenCrewRankTR),
+            avg_sk,
+            avg_cr,
+            p.year
+        ))
         
-        
-        # p = people['eva-ermlich']
-        # Prepare the document data to be written
-        if i % 100 == 0:
-            print("Currently uploading:", i, p.name)
-        try:
-            # doc_data = {
-            #     "Name": p.name,
-            #     "key": p.key.replace("/", "-"),
-            #     'gender': p.gender,
-            #     "Teams": p.teams.tolist() if isinstance(p.teams, np.ndarray) else p.teams,
-            #     "sr": int(p.sr.ordinal(target=targetElo, alpha=200 / model.sigma)),
-            #     "cr": int(p.cr.ordinal(target=targetElo, alpha=200 / model.sigma)),
-            #     "wsr": int(p.wsr.ordinal(target=targetElo, alpha=200 / model.sigma)),
-            #     "wcr": int(p.wcr.ordinal(target=targetElo, alpha=200 / model.sigma)),
-            #     "tsr": int(p.tsr.ordinal(target=targetElo, alpha=200 / model.sigma)),
-            #     "tcr": int(p.tcr.ordinal(target=targetElo, alpha=200 / model.sigma)),
-            #     "wtsr": int(p.wtsr.ordinal(target=targetElo, alpha=200 / model.sigma)),
-            #     "wtcr": int(p.wtcr.ordinal(target=targetElo, alpha=200 / model.sigma)),
-            #     "SkipperRank": int(p.skipperRank),
-            #     "CrewRank": int(p.crewRank),
-            #     "WomenSkipperRank": int(p.womenSkipperRank),
-            #     "WomenCrewRank": int(p.womenCrewRank),
-            #     "SkipperRank": int(p.skipperRank),
-            #     "CrewRank": int(p.crewRank),
-            #     "WomenSkipperRank": int(p.womenSkipperRank),
-            #     "WomenCrewRank": int(p.womenCrewRank),
-            #     "SkipperRankTR": int(p.skipperRankTR),
-            #     "CrewRankTR": int(p.crewRankTR),
-            #     "WomenSkipperRankTR": int(p.womenSkipperRankTR),
-            #     "WomenCrewRankTR": int(p.womenCrewRankTR),
-            #     "Links": p.links.tolist() if isinstance(p.links, np.ndarray) else p.links if isinstance(p.links, str) or isinstance(p.links, list) else p.links[0].tolist(),
-            #     "Year": p.year,
-            #     "Seasons": {'skipper': list(p.seasons['skipper']), 'crew': list(p.seasons['crew'])},
-            #     "Cross":  sum([race['cross'] for race in p.races if 'cross' in race.keys()]),
-            #     "OutLinks": sum([race['outLinks'] for race in p.races if 'outLinks' in race.keys()]),
-            #     'races': p.races,
-            #     "Rivals": p.rivals,
-            #     "lastUpdate": firestore.SERVER_TIMESTAMP
-            # }
-            
-            
-            try:
-                cursor.execute("""
-                        INSERT IGNORE INTO Sailors (sailorID, name, gender, sr, cr, wsr, wcr, tsr, tcr, wtsr, wtcr, sRank, cRank, wsRank, wcRank, tsRank, tcRank, wtsRank, wtcRank, year)
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                """,   (p.key.replace("/","-"),
-                        p.name,
-                        p.gender,
-                        # p.teams.tolist() if isinstance(p.teams, np.ndarray) else p.teams,
-                        int(p.sr.ordinal(target=targetElo, alpha=200 / model.sigma)),
-                        int(p.cr.ordinal(target=targetElo, alpha=200 / model.sigma)),
-                        int(p.wsr.ordinal(target=targetElo, alpha=200 / model.sigma)),
-                        int(p.wcr.ordinal(target=targetElo, alpha=200 / model.sigma)),
-                        int(p.tsr.ordinal(target=targetElo, alpha=200 / model.sigma)),
-                        int(p.tcr.ordinal(target=targetElo, alpha=200 / model.sigma)),
-                        int(p.wtsr.ordinal(target=targetElo, alpha=200 / model.sigma)),
-                        int(p.wtcr.ordinal(target=targetElo, alpha=200 / model.sigma)),
-                        int(p.skipperRank),
-                        int(p.crewRank),
-                        int(p.womenSkipperRank),
-                        int(p.womenCrewRank),
-                        int(p.skipperRankTR),
-                        int(p.crewRankTR),
-                        int(p.womenSkipperRankTR),
-                        int(p.womenCrewRankTR),
-                        p.year))
-                        # sum([race['cross'] for race in p.races if 'cross' in race.keys()]),
-                        # sum([race['outLinks'] for race in p.races if 'outLinks' in race.keys()])))
+        raceCounts = (lambda rc_norm, ps: {
+                        'skipper': {season: rc_norm.get(season, {}).get('Skipper', 0) for season in [s[0] for s in list(ps['skipper'])]},
+                        'crew': {season: rc_norm.get(season, {}).get('Crew', 0) for season in [s[0] for s in list(ps['crew'])]}
+                    })( (lambda rc: {s: {pos.title(): cnt for pos, cnt in posd.items()} for s, posd in rc.items()})(getCounts(p.races)), p.seasons ) 
+
+        for position in ['Skipper', 'Crew']:
+            if position not in p.rivals:
+                continue
+            for key, values in p.rivals[position].items():
+                for season in values['races']:
+                    rival_rows.append((
+                        p.key.replace("/", "-"),
+                        key,
+                        values['name'],
+                        values['team'],
+                        position,
+                        season,
+                        values['races'][season],
+                        values['wins'][season]
+                    ))
                     
-            except mysql.connector.errors.IntegrityError as e:
-                if e.errno == 1062:  # duplicate key
-                    print("Duplicate found — skipping")
-                else:
+        for position in ['skipper', 'crew']:
+            if p.key is None:
+                continue
+            for season, team in set(p.seasons[position]):
+                sailor_teams_rows.append((
+                    p.key.replace("/", "-"),
+                    team,
+                    season,
+                    position,
+                    raceCounts[position][season]
+                ))
+
+        # Commit in batches
+        if (i + 1) % batch_size == 0:
+            print(f"Uploading sailors {i - batch_size + 1} to {i}...", len(sailor_teams_rows))
+            cursor.executemany("""
+                INSERT IGNORE INTO Sailors (
+                    sailorID, name, gender, sr, cr, wsr, wcr, tsr, tcr, wtsr, wtcr,
+                    sRank, cRank, wsRank, wcRank, tsRank, tcRank, wtsRank, wtcRank,
+                    avgSkipperRatio, avgCrewRatio, year
+                )
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            """, sailor_rows)
+            sailor_rows.clear()
+
+            if rival_rows:
+                cursor.executemany("""
+                    INSERT IGNORE INTO SailorRivals (
+                        sailorID, rivalID, rivalName, rivalTeam, position, season, raceCount, winCount
+                    )
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                """, rival_rows)
+                rival_rows.clear()
+            
+            if sailor_teams_rows:
+                try:
+                    cursor.executemany("""
+                        INSERT IGNORE INTO SailorTeams(sailorID, teamID, season, position, raceCount)
+                        VALUES(%s,%s,%s,%s,%s)
+                    """, sailor_teams_rows)
+                    sailor_teams_rows.clear()
+                except Exception as e:
+                    print(sailor_teams_rows)
                     raise e
 
-        except Exception as e:
-            print(p, p.links)
-            raise e
+            connection.commit()
 
-        # Add the set operation to the batch
-        # doc_ref = col.document(p.key.replace("/", "-"))
-        # batch.set(doc_ref, doc_data, merge=True)
+    # Final flush
+    if sailor_rows:
+        cursor.executemany("""
+                INSERT IGNORE INTO Sailors (
+                    sailorID, name, gender, sr, cr, wsr, wcr, tsr, tcr, wtsr, wtcr,
+                    sRank, cRank, wsRank, wcRank, tsRank, tcRank, wtsRank, wtcRank,
+                    avgSkipperRatio, avgCrewRatio, year
+                )
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            """, sailor_rows)
+        connection.commit()
+    if rival_rows:
+        cursor.executemany("""
+                    INSERT INTO SailorRivals (
+                        sailorID, rivalID, rivalName, rivalTeam, position, season, raceCount, winCount
+                    )
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                """, rival_rows)
+    if sailor_teams_rows:
+        cursor.executemany("""
+                INSERT IGNORE INTO SailorTeams(sailorID, teamID, season, position, raceCount)
+                VALUES(%s,%s,%s,%s,%s)
+            """, sailor_teams_rows)
 
-        # Commit the batch every 20 documents
-        # if (i + 1) % batch_size == 0:
-            # batch.commit()
-            # batch = db.batch()  # Start a new batch for the next set of documents
-            
+        connection.commit()
 
-    # Commit any remaining operations if there are less than 20 documents left
-    # if (i + 1) % batch_size != 0:
-    # batch.commit()
-
+    print("✅ All sailors uploaded successfully!")
 
 def uploadTeams(df_sailors, df_races_full, people, cursor, connection):
 
@@ -1125,7 +1150,7 @@ def uploadTeams(df_sailors, df_races_full, people, cursor, connection):
     team_link_map = pd.Series(
         df_cleaned.Teamlink.values, index=df_cleaned.Team).to_dict()
 
-    # Optional: Loop for printing (if necessary)
+
     for i, (team, row) in enumerate(team_stats.iterrows()):
         # if team != "MIT":
         #     continue
@@ -1134,29 +1159,11 @@ def uploadTeams(df_sailors, df_races_full, people, cursor, connection):
         avgRatio = row['avgRatio']
         numCurMembers = row['numCurMembers']
 
-    # for i,team in enumerate(teamNames):
-    #     print(f"{i}/{lenteams} {team}")
-    #     temp = df_sailors.loc[(df_sailors['Teams'].apply(lambda x: team in x)) & (df_sailors['Seasons'].apply(lambda x: 'f24' in x['skipper'] or 'f24' in x['crew']))]
-    #     avg = (temp.loc[df_sailors['Seasons'].apply(lambda x: 'f24' in x['skipper']), 'SkipperOrdinal'].mean() + temp.loc[df_sailors['Seasons'].apply(lambda x: 'f24' in x['crew']), 'CrewOrdinal'].mean()) / 2
-    #     avgRatio = (temp.loc[df_sailors['Seasons'].apply(lambda x: 'f24' in x['crew']),'skipperAvgRatio'].mean() + temp.loc[df_sailors['Seasons'].apply(lambda x: 'f24' in x['crew']),'crewAvgRatio'].mean()) / 2
-    #     numCurMembers = len(temp)
-
         region = teamRegions[team]
         # teamLink = df_races.loc[df_races['Team'] == team, 'Teamlink'].iloc[0]
         # Default to '' if team not found
         teamLink = team_link_map.get(team, '')
         url = f"https://scores.collegesailing.org/schools/{teamLink.split("/")[2]}"
-
-        if scrape:
-            page = requests.get(url)
-            teamPage = BeautifulSoup(page.content, 'html.parser')
-
-            try:
-                region = teamPage.find(
-                    'span', class_="page-info-value").contents[0].contents[0]
-            except:
-                print(url)
-                continue
 
         filtered_people = [p for p in people.values() if team in p.teams]
 
@@ -1176,37 +1183,28 @@ def uploadTeams(df_sailors, df_races_full, people, cursor, connection):
                     'wtcr': p.wtcr.ordinal(target=targetElo, alpha=200 / model.sigma),
                     'avgSkipperRatio': float(p.avgSkipperRatio),
                     'avgCrewRatio': float(p.avgCrewRatio),
-                    'raceCount': getCounts(p.races),
-                    'seasons': {'skipper': list(p.seasons['skipper']), 'crew': list(p.seasons['crew'])},
-                    'cross': sum([race['cross'] for race in p.races if 'cross' in race.keys()]),
+                    # season -> position -> count (normalized position names)
+                    'raceCount': (lambda rc: {s: {pos.title(): cnt for pos, cnt in posd.items()} for s, posd in rc.items()})(getCounts(p.races)),
+                    # position -> season -> count (used later when inserting SailorTeams)
+                    'raceCounts': (lambda rc_norm, ps: {
+                        'skipper': {season: rc_norm.get(season, {}).get('Skipper', 0) for season in list(ps['skipper'])},
+                        'crew': {season: rc_norm.get(season, {}).get('Crew', 0) for season in list(ps['crew'])}
+                    })( (lambda rc: {s: {pos.title(): cnt for pos, cnt in posd.items()} for s, posd in rc.items()})(getCounts(p.races)), p.seasons ),
+                    'seasons': p.seasons,
+                    'cross': sum([race.get('cross', 0) for race in p.races]),
                     'outLinks': sum([race['outLinks'] for race in p.races if 'outLinks' in race.keys()]),
                     'skipperRank': int(p.skipperRank),
                     'crewRank': int(p.crewRank),
                     'womenSkipperRank': int(p.womenSkipperRank),
                     'womenCrewRank': int(p.womenCrewRank)
                     } for p in filtered_people]
+        
 
-        # teamRating = 0
-        # if numCurMembers > 0:
-        #     # TODO: Race count is based on both tr and fr here so weighting is wrong...
-        #     teamRatingSkipper = sum([sum([p['sr'] * (p['raceCount'][seas]['Skipper'] / 5) for p in members
-        #                             if seas in p['raceCount'].keys()
-        #                             and 'Skipper' in p['raceCount'][seas].keys()
-        #                             and p['raceCount'][seas]['Skipper'] > 5]) for seas in targetSeasons])
-
-        #     teamRatingCrew = sum([sum([p['cr'] * (p['raceCount'][seas]['Crew']/ 5) for p in members
-        #                             if seas in p['raceCount'].keys()
-        #                             and 'Crew' in p['raceCount'][seas].keys()
-        #                             and p['raceCount'][seas]['Crew'] > 5]) for seas in targetSeasons])
-
-        #     teamRating = (teamRatingSkipper + teamRatingCrew) / numCurMembers
-
-        #   recentRegattas = np.unique([r['raceID'].split("/")[0] + "/" + r['raceID'].split("/")[1] for p in filtered_people
-        #                                                           for r in p.races[-5:]
-        #                               if (datetime.today() - r['date'].to_pydatetime()).days < 14]).tolist()
-        #   print(team, recentRegattas)
-        recentRegattas = []
-
+        topRating = 0
+        topWomenRating = 0
+        topRatingTR = 0
+        topWomenRatingTR = 0
+        
         topRating = 0
         topSkipperSum = 0
         topCrewsSum = 0
@@ -1278,7 +1276,7 @@ def uploadTeams(df_sailors, df_races_full, people, cursor, connection):
 
             topSkippersTR = sorted([p for p in filtered_people
                                     if p.tsr.mu != model.mu
-                                    if not set(p.seasons['skipper']).isdisjoint(targetTRSeasons)],
+                                    if not p.hasTargetSeasons(targetSeasons, 'skipper')],
                                    key=lambda x: x.tsr.ordinal(
                                        target=targetElo, alpha=200 / model.sigma),
                                    reverse=True)
@@ -1289,7 +1287,7 @@ def uploadTeams(df_sailors, df_races_full, people, cursor, connection):
 
             topCrewsTR = sorted([p for p in filtered_people
                                  if p.tcr.mu != model.mu
-                                 if not set(p.seasons['crew']).isdisjoint(targetTRSeasons)],
+                                 if not p.hasTargetSeasons(targetSeasons, 'crew')],
                                 key=lambda x: x.tcr.ordinal(
                                     target=targetElo, alpha=200 / model.sigma),
                                 reverse=True)
@@ -1304,7 +1302,7 @@ def uploadTeams(df_sailors, df_races_full, people, cursor, connection):
             topWomenSkippersTR = sorted([p for p in filtered_people
                                          if p.wtsr.mu != model.mu
                                          and p.gender == 'F'
-                                         and not set(p.seasons['skipper']).isdisjoint(targetTRSeasons)
+                                         and not p.hasTargetSeasons(targetTRSeasons, 'skipper')
                                          ],
                                         key=lambda x: x.wtsr.ordinal(
                                             target=targetElo, alpha=200 / model.sigma),
@@ -1317,7 +1315,7 @@ def uploadTeams(df_sailors, df_races_full, people, cursor, connection):
             topWomenCrewsTR = sorted([p for p in filtered_people
                                       if p.wtcr.mu != model.mu
                                       and p.gender == 'F'
-                                      and not set(p.seasons['crew']).isdisjoint(targetTRSeasons)
+                                      and not p.hasTargetSeasons(targetTRSeasons, 'crew')
                                       ],
                                      key=lambda x: x.wtcr.ordinal(
                                          target=targetElo, alpha=200 / model.sigma),
@@ -1329,178 +1327,56 @@ def uploadTeams(df_sailors, df_races_full, people, cursor, connection):
             topWomenRatingTR = (topWomenSkipperTRSum +
                                 topWomenCrewTRSum) / (numTops * 2)
 
-            # numTops = 3
-            # topWomenSkippersTR = sorted([p['wtsr'] for p in members if p['wtsr'] != 1000
-            #                                                         and not set(p['seasons']['skipper']).isdisjoint(targetSeasons)], reverse=True)[:numTops]
-            # topWomenCrewsTR = sorted([p['wtcr'] for p in members if p['wtcr'] != 1000 and not set(p['seasons']['crew']).isdisjoint(targetSeasons)], reverse=True)[:numTops]
-
-            # topWomenRatingTR = (sum(topWomenSkippersTR) + sum(topWomenCrewsTR)) / (numTops * 2)
-
-        # '#1': ,'#2': ,
-        teams.append({"name": team,
-                      'topRating': topRating,
-                      'topSkippers': topSkippers[:3],
-                      'topWomenRating': topWomenRating,
-                      'topRatingTR': topRatingTR,
-                      'topWomenRatingTR': topWomenRatingTR,
-                      #   'teamRating': teamRating,
-                      "avg": avg,
-                      'avgRatio': avgRatio,
-                      "region": region,
-                      "link": url,
-                      'memberCount': numCurMembers,
-                      'topSkippersTR': topSkippersTR[:3],
-                      'topCrewsTR': topCrewsTR[:3],
-                      })
-
-        predteams.append({"name": team,
-                          'link': url,
-                          'topRating': topRating,
-                          'topRatingTR': topRatingTR,
-                          'topSkippers': topSkippers,
-                          'topCrews': topCrews,
-                          'SkippersTR': topSkippersTR,
-                          'CrewsTR': topCrewsTR,
-                          'WomenSkippersTR': topWomenSkippersTR,
-                          'WomenCrewsTR': topWomenCrewsTR,
-                          })
-
-        # col.document(team.replace(" ", "-").replace("/", "-").lower()).set({"name": team,
-        #                                                                     "avg": avg,
-        #                                                                     'topSkippers': topSkippers,
-        #                                                                     'topSkippersTR': topSkippersTR,
-        #                                                                     'topCrewsTR': topCrewsTR,
-        #                                                                     'topRating': topRating,
-        #                                                                     'topWomenRating': topWomenRating,
-        #                                                                     'topRatingTR': topRatingTR,
-        #                                                                     'topWomenRatingTR': topWomenRatingTR,
-        #                                                                     'avgRatio': avgRatio,
-        #                                                                     "region": region,
-        #                                                                     'recentRegattas': recentRegattas,
-        #                                                                     "link": url,
-        #                                                                     'members': members})
 
         cursor.execute("""
-                    INSERT INTO Teams (teamID, teamName, topFleetRating, topWomenRating, topTeamRating, topWomenTeamRating, avgRatio, region, link)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
-            """,   (team, team, topRating, topWomenRating, topRatingTR, topWomenRatingTR, avgRatio, region, url))            
+                    INSERT INTO Teams (teamID, teamName, topFleetRating, topWomenRating, topTeamRating, topWomenTeamRating, avgRating, avgRatio, region, link)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            """,   (team, team, topRating, topWomenRating, topRatingTR, topWomenRatingTR, avg, avgRatio, region, url))            
         
         print("inserted team", team)
+        
+        batch_size = 200  # adjust for your DB/network limits
+        rows_to_insert = []
+
         for member in members:
             if member['key'] is None:
                 print("No key for", member['name'])
                 continue
+
+            for position in ['skipper', 'crew']:
+                for season in set(member['seasons'][position]):
+                    rows_to_insert.append((
+                        member['key'].replace("/", "-"),
+                        team,
+                        season,
+                        position,
+                        member['raceCounts'][position][season]
+                    ))
+
+        # Insert in batches
+        for start in range(0, len(rows_to_insert), batch_size):
+            batch = rows_to_insert[start:start + batch_size]
             try:
-                cursor.execute("""
-                        INSERT IGNORE INTO SailorTeams(sailorID, teamID)
-                        VALUES(%s,%s)""", (member['key'].replace("/","-"), 
-                                        team))
-                print("Inserted" + member['key'])
+                cursor.executemany("""
+                    INSERT IGNORE INTO SailorTeams(sailorID, teamID, season, position, raceCount)
+                    VALUES(%s,%s,%s,%s,%s)
+                """, batch)
+                connection.commit()
             except mysql.connector.errors.IntegrityError as e:
-                print(member['key'], "key failed to insert")
-                # continue
+                print("Batch insert failed:", e)
                 raise e
+
         connection.commit()
         
-    #     if i % 20 == 0:  # commit every 20 documents
-    #         batch.commit()
-
-    # batch.commit()
-    # doc = db.collection('vars').document('eloTeams').set({"teams": teams})
-
-    # doc = db.collection('vars').document('predTeams').set({"teams": predteams})
     newTeams = sorted(teams, key=lambda x: x['topRating'], reverse=True)
     return newTeams
-
-
-def uploadTops(people):
-    topSkippers = []
-    for p in sorted([p for p in people.values() if p.skipperRank <= 100
-                     and p.skipperRank != 0
-                     and not set(p.seasons['skipper']).isdisjoint(targetSeasons)], key=lambda p: p.skipperRank):
-        topSkippers.append({'name': p.name, 'key': p.key, 'year': p.year, 'rank': int(p.skipperRank), 'team': list(
-            p.teams), 'gender': p.gender, 'rating': p.sr.ordinal(target=targetElo, alpha=200 / model.sigma), 'seasons': list(p.seasons['skipper'])})
-    db.collection('vars').document('topSkippers').set({"sailors": topSkippers})
-
-    topCrews = []
-    for p in sorted([p for p in people.values() if p.crewRank <= 100
-                     and p.crewRank != 0
-                     and not set(p.seasons['crew']).isdisjoint(targetSeasons)], key=lambda p: p.crewRank):
-        topCrews.append({'name': p.name, 'key': p.key, 'year': p.year, 'rank': int(p.crewRank), 'team': list(
-            p.teams), 'gender': p.gender, 'rating': p.cr.ordinal(target=targetElo, alpha=200 / model.sigma), 'seasons': list(p.seasons['crew'])})
-    db.collection('vars').document('topCrews').set({"sailors": topCrews})
-
-    topSkippers = []
-    for p in sorted([p for p in people.values() if p.skipperRankTR <= 100
-                     and p.skipperRankTR != 0
-                     and not set(p.seasons['skipper']).isdisjoint(targetTRSeasons)], key=lambda p: p.skipperRankTR):
-        topSkippers.append({'name': p.name,
-                            'key': p.key,
-                            'year': p.year,
-                            'rank': int(p.skipperRankTR),
-                            'team': list(p.teams),
-                            'gender': p.gender,
-                            'rating': p.tsr.ordinal(target=targetElo, alpha=200 / model.sigma),
-                            'seasons': list(p.seasons['skipper'])})
-    db.collection('vars').document(
-        'topSkippersTR').set({"sailors": topSkippers})
-
-    topCrews = []
-    for p in sorted([p for p in people.values() if p.crewRankTR <= 100
-                     and p.crewRankTR != 0
-                     and not set(p.seasons['crew']).isdisjoint(targetTRSeasons)], key=lambda p: p.crewRankTR):
-        topCrews.append({'name': p.name, 'key': p.key, 'year': p.year, 'rank': int(p.crewRankTR), 'team': list(
-            p.teams), 'gender': p.gender, 'rating': p.tcr.ordinal(target=targetElo, alpha=200 / model.sigma), 'seasons': list(p.seasons['crew'])})
-    db.collection('vars').document('topCrewsTR').set({"sailors": topCrews})
-
-    # Womens
-    topSkippers = []
-    for p in sorted([p for p in people.values() if p.womenSkipperRank <= 100
-                     and p.womenSkipperRank != 0
-                     and not set(p.seasons['skipper']).isdisjoint(targetSeasons)], key=lambda p: p.womenSkipperRank):
-        topSkippers.append({'name': p.name, 'key': p.key, 'year': p.year, 'rank': int(p.womenSkipperRank), 'team': list(
-            p.teams), 'gender': p.gender, 'rating': p.wsr.ordinal(target=targetElo, alpha=200 / model.sigma), 'seasons': list(p.seasons['skipper'])})
-    db.collection('vars').document(
-        'topWomenSkippers').set({"sailors": topSkippers})
-    topCrews = []
-    for p in sorted([p for p in people.values() if p.womenCrewRank <= 100
-                     and p.womenCrewRank != 0
-                     and not set(p.seasons['crew']).isdisjoint(targetSeasons)], key=lambda p: p.womenCrewRank):
-        topCrews.append({'name': p.name, 'key': p.key, 'year': p.year, 'rank': int(p.womenCrewRank), 'team': list(
-            p.teams), 'gender': p.gender, 'rating': p.wcr.ordinal(target=targetElo, alpha=200 / model.sigma), 'seasons': list(p.seasons['crew'])})
-    db.collection('vars').document('topWomenCrews').set({"sailors": topCrews})
-
-    topSkippers = []
-    for p in sorted([p for p in people.values() if p.womenSkipperRankTR <= 100
-                     and p.womenSkipperRankTR != 0
-                     and not set(p.seasons['skipper']).isdisjoint(targetTRSeasons)], key=lambda p: p.womenSkipperRankTR):
-        topSkippers.append({'name': p.name, 'key': p.key, 'year': p.year, 'rank': int(p.womenSkipperRankTR), 'team': list(
-            p.teams), 'gender': p.gender, 'rating': p.wtsr.ordinal(target=targetElo, alpha=200 / model.sigma), 'seasons': list(p.seasons['skipper'])})
-    db.collection('vars').document(
-        'topWomenSkippersTR').set({"sailors": topSkippers})
-    topCrews = []
-    for p in sorted([p for p in people.values() if p.womenCrewRankTR <= 100
-                     and p.womenCrewRankTR != 0
-                     and not set(p.seasons['crew']).isdisjoint(targetTRSeasons)], key=lambda p: p.womenCrewRankTR):
-        topCrews.append({'name': p.name, 'key': p.key, 'year': p.year, 'rank': int(p.womenCrewRankTR), 'team': list(
-            p.teams), 'gender': p.gender, 'rating': p.wtcr.ordinal(target=targetElo, alpha=200 / model.sigma), 'seasons': list(p.seasons['crew'])})
-    db.collection('vars').document(
-        'topWomenCrewsTR').set({"sailors": topCrews})
-
-
-def uploadAllSailors(people):
-    flattened_dict = {p.key: {'team': p.teams[-1], 'year': p.year, 'name': p.name}
-                      for p in people.values() if 's25' in p.seasons['skipper'] or 's25' in p.seasons['crew'] or 'f25' in p.seasons['skipper'] or 'f25' in p.seasons['crew']}
-    # print(flattened_dict)
-    db.collection('vars').document('allSailors').set(
-        {'allSailors': json.dumps(flattened_dict, separators=(',', ':'))})
 
 
 if __name__ == "__main__":
     start = time.time()
 
     doScrape = False
-    doUpload = True
+    doUpload = False
 
     if doScrape:
         df_races = runFleetScrape()
@@ -1563,10 +1439,8 @@ if __name__ == "__main__":
 
     if doUpload:
         uploadSailors(people, cursor)
-        connection.commit() 
+        # connection.commit()
         teams = uploadTeams(df_sailors, df_races_full, people, cursor, connection)
-        # uploadTops(people)
-        # uploadAllSailors(people)
         connection.commit()
 
     cursor.close()
