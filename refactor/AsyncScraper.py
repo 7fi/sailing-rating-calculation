@@ -27,16 +27,20 @@ def makeRaceSeries(score, team, raceNum, division, name, link, gradYear, positio
     raceSeries["Score"] = score
     raceSeries["Div"] = division
     raceSeries["Sailor"] = name
-    raceSeries["Link"] = link
+    raceSeries["Link"] = link if link is not None else "Unknown"
+    raceSeries["key"] = link if link is not None else name + "-" + team
     raceSeries["GradYear"] = gradYear
     raceSeries["Position"] = position
     raceSeries["Partner"] = partner
-    raceSeries["PartnerLink"] = partnerLink
+    raceSeries["PartnerLink"] = partnerLink if partnerLink is not None else "Unknown"
+    raceSeries["partnerKey"] = partnerLink if partnerLink is not None else partner + "-" + team
     raceSeries["Venue"] = venue
     raceSeries["Regatta"] = regatta
     raceSeries["Scoring"] = scoring
     raceSeries['raceID'] = "" + regatta + "/" + str(raceNum) + division
+    raceSeries['adjusted_raceID'] = "" + regatta + "/" + str(raceNum) if scoring == "Combined" else "" + regatta + "/" + str(raceNum) + division
     raceSeries["Date"] = date
+    raceSeries["raceNum"] = str(raceNum)
     raceSeries["Team"] = team
     raceSeries["Teamlink"] = teamlink
     raceSeries["Boat"] = boat
@@ -135,6 +139,17 @@ def parseScore(scoreString):
     elif scoreString.has_attr('title'):
         return int(scoreString['title'][1:-1].split(",")[0].split(":")[0])
 
+def addRaces(finalRaces, teamScores, sailors, others, pos, teamHome, host, regatta, teamLink, scoring, boat_type, raceDate):
+    for sailor in sailors:
+        partners = [other['name'] for race in sailor['races'] for other in others if other['div'] == sailor['div'] and race in other['races']]
+        partnerLinks = [other['link'] for race in sailor['races'] for other in others if other['div'] == sailor['div'] and race in other['races']]
+        for i, score in enumerate(teamScores[sailor['div']]):
+            if i + 1 in sailor['races']:
+                partner = partners[sailor['races'].index(i + 1)] if sailor['races'].index(i + 1) < len(partners) else "Unknown"
+                partnerLink = partnerLinks[sailor['races'].index(i + 1)] if sailor['races'].index(i + 1) < len(partners) else "Unknown"
+                finalRaces.append(makeRaceSeries(score, teamHome, i + 1, sailor['div'], sailor['name'], sailor['link'],sailor['year'], pos, partner, partnerLink, host,regatta, raceDate, teamLink, scoring, boat_type))
+
+
 def processData(soup):
     if soup is None:
         print("None soup...")
@@ -145,7 +160,7 @@ def processData(soup):
     fullScores = soup['fullScores']
     sailors = soup['sailors']
     scoring = soup['scoring']
-    date = soup['date']
+    raceDate = soup['date']
     
     if len(fullScores.find_all('table', class_="results")) == 0: 
         print(f"no scores entered for {regatta}, skipping")
@@ -155,11 +170,9 @@ def processData(soup):
     boat_key = [key for key in page_keys if 'Boat' in key.text][0]
     boat_type = boat_key.next_sibling.text
     
-    scoreData = fullScores.find_all('table', class_="results")[
-        0].contents[1].contents
+    scoreData = fullScores.find_all('table', class_="results")[0].contents[1].contents
     # sailorData = sailors.find('table', class_="sailors").contents[1].contents
-    header = fullScores.find(
-        'table', class_="results").find_all('th', class_="right")
+    header = fullScores.find('table', class_="results").find_all('th', class_="right")
     raceCount = int(header[len(header) - 2].text)
         
     numDivisions = 1
@@ -173,18 +186,15 @@ def processData(soup):
     teamHomes = [(scoreData[(k*(numDivisions + 1)) - (numDivisions + 1)].find('a').text) for k in range(teamCount)]
     
     host = fullScores.find("span", itemprop='location').text
-    # date = fullScores.find("time").attrs['datetime']
-    # date = date[:10]
     
     if scoring == "Combined":
         teamHomes = teamHomes * numDivisions
 
     # loop through teams
-
     for i in range(1, teamCount + 1):
         teamHome = scoreData[(i*(numDivisions + 1)) - (numDivisions + 1)].find('a').text
         teamName = scoreData[(i*(numDivisions + 1)) - (numDivisions + 1) + 1].contents[2].text
-        teamLink = scoreData[(i*(numDivisions + 1)) - (numDivisions + 1)].find('a')['href']
+        teamLink = scoreData[(i*(numDivisions + 1)) - (numDivisions + 1)].find('a')['href'].split("/")[2]
         teamScores = {'A': [], 'B': [], 'C':[]}
 
         teamScores["A"] = [parseScore(scoreData[(i*(numDivisions + 1)) - (numDivisions + 1)].contents[j]) for j in range(4, (4 + raceCount))]
@@ -194,7 +204,7 @@ def processData(soup):
             teamScores["C"] = [parseScore(scoreData[(i*(numDivisions + 1)) - (numDivisions + 1) + 2].contents[j]) for j in range(4, (4 + raceCount))]
 
         # teamNameEls = [i.parent for i in sailors.find_all('a') if i['href'] == teamLink] # this actually doesnt work because what if teams have two boats...
-        teamNameEls = [i for i in sailors.find_all('td', class_="teamname") if i.text == teamName and i.previous_sibling.find('a')['href'] == teamLink]
+        teamNameEls = [i for i in sailors.find_all('td', class_="teamname") if i.text == teamName and i.previous_sibling.find('a')['href'].split("/")[2] == teamLink]
         
         if len(teamNameEls) == 0:
             print("team name entered wrong. Skipping team", teamName, regatta)
@@ -271,7 +281,6 @@ def processData(soup):
             #     continue
             
             # sail for two different boats at the same time (impossible)
-            
             for i, score in enumerate(teamScores[skipper['div']]):
                     if i + 1 in skipper['races']:
                         for race in finalRaces:
@@ -281,7 +290,7 @@ def processData(soup):
                                     finalRaces = [s for s in finalRaces if not s.equals(race)]
                                     skipper['races'].remove(i+1)
 
-        # Crew for boath A and B maybe shouldnt be removed? it is legal to do once
+        # Crew for both A and B maybe shouldnt be removed? it is legal to do once
         for crew in crews:
         #     self = 0
         #     for other in crews: 
@@ -300,30 +309,12 @@ def processData(soup):
                                     finalRaces = [s for s in finalRaces if not s.equals(race)]
                                     crew['races'].remove(i+1)
         
-        
         # update skippers and crews once all rows for a team are done.
-        for skipper in skippers:
-            partners = [crew['name'] for race in skipper['races'] for crew in crews if crew['div'] == skipper['div'] and race in crew['races']]
-            partnerLinks = [crew['link'] for race in skipper['races'] for crew in crews if crew['div'] == skipper['div'] and race in crew['races']]
-            for i, score in enumerate(teamScores[skipper['div']]):
-                if i + 1 in skipper['races']:
-                    partner = partners[skipper['races'].index(i + 1)] if skipper['races'].index(i + 1) < len(partners) else "Unknown"
-                    partnerLink = partnerLinks[skipper['races'].index(i + 1)] if skipper['races'].index(i + 1) < len(partners) else "Unknown"
-                    finalRaces.append(makeRaceSeries(score, teamHome, i + 1, skipper['div'], skipper['name'], skipper['link'],skipper['year'], "Skipper", partner, partnerLink, host,regatta, date, teamLink, scoring, boat_type))
-        
-        for crew in crews:
-            partners = [skipper['name'] for race in crew['races'] for skipper in skippers if skipper['div'] == crew['div'] and race in skipper['races']]
-            partnerLinks = [skipper['link'] for race in crew['races'] for skipper in skippers if skipper['div'] == crew['div'] and race in skipper['races']]
-
-            for i, score in enumerate(teamScores[crew['div']]):
-                if i + 1 in crew['races']:
-                    partner = partners[crew['races'].index(i + 1)] if crew['races'].index(i + 1) < len(partners) else "Unknown"
-                    partnerLink = partnerLinks[crew['races'].index(i + 1)] if crew['races'].index(i + 1) < len(partners) else "Unknown"
-                    finalRaces.append(makeRaceSeries(score, teamHome, i + 1, crew['div'], crew['name'],crew['link'], crew['year'], "Crew", partner, partnerLink, host,regatta, date, teamLink, scoring, boat_type))
-
+        addRaces(finalRaces, teamScores, skippers, crews, 'Skipper', teamHome, host, regatta, teamLink, scoring, boat_type, raceDate)
+        addRaces(finalRaces, teamScores, crews, skippers, 'Crew', teamHome, host, regatta, teamLink, scoring, boat_type, raceDate)
         skippers = []
         crews = []
-
+        
     # Test for duplicate scores
     # for pos in ['Skipper', 'Crew']:
     #     for division in range(numDivisions):
@@ -382,15 +373,15 @@ def runFleetScrape():
     seasons = [[f"f{i}",f"s{i}"] for i in range (16,26)]
     seasons = [sub for s in seasons for sub in s]
     
-    # seasons = ['f24']
+    # seasons = ['f25']
 
-    # df_races = pd.DataFrame()
-    # try:
-    #     print("attempting to read from file")
-    #     df_races = pd.read_json("racesfr.json") 
-    #     print("read from file")
-    # except:
-    df_races = pd.DataFrame(columns=["Score", "Div", "Sailor","Link", "GradYear", "Position", "Partner", "Venue", "Regatta", "Scoring", "raceID", "Date", "Team", "Teamlink"]) 
+    df_races = pd.DataFrame()
+    try:
+        print("attempting to read from file")
+        df_races = pd.read_json("racesfr.json") 
+        print("read from file")
+    except:
+        df_races = pd.DataFrame(columns=["Score", "Div", "Sailor", "Link", "key", "GradYear", "Position", "Partner", "Venue", "Regatta", "Scoring", "raceID","adjusted_raceID", "Date", "raceNum", "Team", "Teamlink", "Boat"]) 
 
     racesRegattas = df_races['Regatta'].unique()
     
@@ -418,7 +409,7 @@ def runFleetScrape():
             if (scoring == "3 Divisions" or scoring == "2 Divisions" or scoring == "Combined") and scrape:
                 regattas[season + "/" + link['href']] = {"link":season + "/" + link['href'], "scoring":scoring, 'rescrape': rescrape, 'date': regatta_date}
 
-    # regattas = {'s24/st-francis-invite':{'link':'s24/st-francis-invite','scoring':'2 Divisions'}}
+    # regattas = {'f24/ucsd-frosh-soph' : {'link':'f24/ucsd-frosh-soph','scoring':'2 Divisions', 'rescrape' : True, 'date': ''}}
 
     if len(regattas.values()) > 0:
         totalRows = asyncio.run(main(regattas))
@@ -426,10 +417,10 @@ def runFleetScrape():
         df_races = pd.concat([df_races, pd.DataFrame(totalRows)])
         df_races = df_races.drop_duplicates(subset=['raceID', 'Sailor'], keep='last').reset_index(drop=True)
         df_races.to_json(f"racesfr.json", index=False, date_format='iso')
-        df_races.to_json(f"racesfr-{date.today().strftime("%Y%m%d")}.json", index=False, date_format='iso')
-        if len(totalRows) > 0:
-            df_races_new = pd.DataFrame(totalRows)
-            df_races_new.to_json("races_new_fr.json", index=False)
+        # df_races.to_json(f"racesfr-{date.today().strftime("%Y%m%d")}.json", index=False, date_format='iso')
+        # if len(totalRows) > 0:
+        #     df_races_new = pd.DataFrame(totalRows)
+        #     df_races_new.to_json("races_new_fr.json", index=False, date_format='iso')
     else:
         print("no new races to be scraped.")
 

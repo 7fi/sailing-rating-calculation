@@ -14,7 +14,7 @@ from refactor.TRScraper import scrapeTR
 import json
 import time
 
-from regions import teamRegions
+from refactor.regions import teamRegions
 import mysql.connector
 
 from openskill.models import PlackettLuce, BradleyTerryFull
@@ -74,7 +74,7 @@ def adjust_race_id(row):
 
 
 cred = credentials.Certificate("thecrowsnestapp-creds.json")
-# firebase_admin.initialize_app(cred)
+firebase_admin.initialize_app(cred)
 db = firestore.client()
 
 # Create a connection
@@ -104,8 +104,6 @@ merges = {'carter-anderson-2027': 'carter-anderson',
           'ian-hopkins-guerra-2026': 'ian-hopkins-guerra',
           'connor-nelson-2024': 'connor-nelson', 
           'Gavin Hudson-Northeastern': 'gavin-hudson', 
-          'Jeremy Bullock-Northeastern': 'jeremy-bullock',
-          'Emma Cole-Northeastern': 'emma-cole', 
           'Nathalie Caudron-Northeastern': 'nathalie-caudron'}
 
 
@@ -746,14 +744,11 @@ def main(df_sailor_ratings, df_sailor_info, df_races_full):
             tempRating = 0
             for type, racers in zip(['Skiper', 'Crew'], [skippers, crews]):
                 if womens:
-                    ratings = [r.wtsr if type ==
-                               'Skipper' else r.wtcr for r in racers]
+                    ratings = [r.wtsr if type == 'Skipper' else r.wtcr for r in racers]
                 else:
-                    ratings = [r.tsr if type ==
-                               'Skipper' else r.tcr for r in racers]
+                    ratings = [r.tsr if type == 'Skipper' else r.tcr for r in racers]
 
-                startingRating = [
-                    r.ordinal(target=targetElo, alpha=200 / model.sigma) for r in ratings]
+                startingRating = [r.ordinal(target=targetElo, alpha=200 / model.sigma) for r in ratings]
                 tempRating += sum(startingRating)
 
             # Calculate regatta average
@@ -774,11 +769,9 @@ def main(df_sailor_ratings, df_sailor_info, df_races_full):
 
             for pos in ['Skipper', 'Crew']:
                 if scoring == 'team':
-                    calculateTR(people, date, regatta, race, row,
-                                pos, scoring, season, regattaAvg, womens)
+                    calculateTR(people, date, regatta, race, row, pos, scoring, season, regattaAvg, womens)
                 else:
-                    calculateFR(people, date, regatta, race, row, pos,
-                                scoring, season, residuals, regattaAvg, womens)
+                    calculateFR(people, date, regatta, race, row, pos, scoring, season, residuals, regattaAvg, womens)
 
         # Update the team ranking history every week
         # date = regatta_data['date'].iloc[0]
@@ -936,18 +929,18 @@ def postCalcAdjust(people, df_races_full):
 
 
 def getCounts(races):
-        # season_counts = defaultdict(int)
-        season_counts = {}
+    # season_counts = defaultdict(int)
+    season_counts = {}
 
-        for race in races:
-            season = race["raceID"].split("/")[0]
-            if season not in season_counts.keys():
-                season_counts[season] = {}
-            if race['pos'] not in season_counts[season].keys():
-                season_counts[season][race['pos']] = 0
-            season_counts[season][race['pos']] += 1
+    for race in races:
+        season = race["raceID"].split("/")[0]
+        if season not in season_counts.keys():
+            season_counts[season] = {}
+        if race['pos'] not in season_counts[season].keys():
+            season_counts[season][race['pos']] = 0
+        season_counts[season][race['pos']] += 1
 
-        return dict(season_counts)
+    return dict(season_counts)
 
 
 def uploadSailors(people, cursor, connection, batch_size=300):
@@ -1163,7 +1156,7 @@ def uploadTeams(df_sailors, df_races_full, people, cursor, connection):
         # teamLink = df_races.loc[df_races['Team'] == team, 'Teamlink'].iloc[0]
         # Default to '' if team not found
         teamLink = team_link_map.get(team, '')
-        url = f"https://scores.collegesailing.org/schools/{teamLink.split("/")[2]}"
+        url = f"https://scores.collegesailing.org/schools/{teamLink}"
 
         filtered_people = [p for p in people.values() if team in p.teams]
 
@@ -1384,12 +1377,9 @@ if __name__ == "__main__":
         # if running scrapers seperately
         df_races = pd.read_json("racesfr.json")
 
-    df_races['raceNum'] = df_races['raceID'].apply(
-        lambda id: int(id.split("/")[2][:-1]))  # Numeric part
-    df_races['raceDiv'] = df_races['raceID'].apply(
-        lambda id: id.split("/")[2][-1])  # Division part (e.g., 'A', 'B')
-    df_races['adjusted_raceID'] = df_races.apply(
-        adjust_race_id, axis=1)  # to make combined division combined
+    df_races['raceNum'] = df_races['raceID'].apply(lambda id: int(id.split("/")[2][:-1]))  # Numeric part
+    df_races['raceDiv'] = df_races['raceID'].apply(lambda id: id.split("/")[2][-1])  # Division part (e.g., 'A', 'B')
+    df_races['adjusted_raceID'] = df_races.apply(adjust_race_id, axis=1)  # to make combined division combined
     df_races['Link'] = df_races['Link'].fillna('Unknown')  # fill empty links
     # df_races['key'] = np.where(df_races['Link'] == 'Unknown', df_races['Sailor'], df_races['Link'])
     df_races['key'] = df_races.apply(

@@ -18,7 +18,7 @@ async def cleanup_semaphore(semaphore):
 async def fetchData(client, semaphore, link):
     retries = 10
     backoff = 1
-    broken_links = ['catherine-lindsay', 'francis-humphrey', 'gabriel-gabe-morreale', 'henriette-smith', 'iona-deacon', 'jason-case-pittsburgh', 'jewel-min-min-kelly', 'race-nicolia', 'showtime']
+    broken_links = ['catherine-lindsay', 'francis-humphrey', 'gabriel-gabe-morreale', 'henriette-smith', 'iona-deacon', 'jason-case-pittsburgh', 'jewel-min-min-kelly', 'race-nicolia', 'showtime', 'gabriel-gabe-morreale-2028']
     if link not in broken_links and os.path.exists(f"sailorPages/{link}.html"):
         with open(f"sailorPages/{link}.html", "r") as f:
             sailorPage = BeautifulSoup(f.read(), 'html.parser')
@@ -54,6 +54,8 @@ async def fetchData(client, semaphore, link):
     sailorData = sailorPage.find('meta', attrs={'name': 'ts:data'})
     try:
         school = sailorPage.find('ul',id='menu').contents[3].text
+        # print(sailorPage.find('ul',id='menu').contents)
+        # print(school)
     except:
         print(link)
     if sailorData is None: 
@@ -112,7 +114,6 @@ def runSailorData():
     trPeople = pd.read_json("trSailorInfoAll.json")
     # old = pd.DataFrame()
     old = pd.read_json("sailor_data2.json")
-    # old = old.sample(frac=0.8, random_state=42) # for testing
     
     df_races['Link'] = df_races['Link'].fillna('Unknown') # fill empty links
     links = df_races['Link'].dropna().unique()
@@ -166,5 +167,5 @@ def runSailorData():
     return df_people_final
 
 
-# if __name__ == "__main__":
-#     runSailorData()
+if __name__ == "__main__":
+    runSailorData()

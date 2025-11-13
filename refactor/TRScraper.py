@@ -2,6 +2,7 @@ from bs4 import BeautifulSoup
 import requests
 import pandas as pd
 import numpy as np
+from datetime import date
 from datetime import date, datetime
 import os
 
@@ -16,7 +17,7 @@ def setup():
   try:
     df_old = pd.read_json("racesTR.json")
   except:
-      df_old = pd.DataFrame(columns=['raceID','regatta','raceNum', 'round','date','allSkipperKeys','allCrewKeys','teamAName','teamAUni','teamANick','teamALink','teamAID','teamABoats','teamAScore','teamAOutcome','teamBName','teamBUni','teamBNick','teamBLink','teamBID','teamBBoats','teamBScore','teamBOutcome'])
+      df_old = pd.DataFrame(columns=['raceID','regatta','raceNum', 'round','Date','allSkipperKeys','allCrewKeys','teamAName','teamAUni','teamANick','teamALink','teamAID','teamABoats','teamAScore','teamAOutcome','teamBName','teamBUni','teamBNick','teamBLink','teamBID','teamBBoats','teamBScore','teamBOutcome'])
 
   regattas = {}
 
@@ -359,10 +360,12 @@ def getData(regattaSoups, regattas):
                                       'crewName': crew['name'], 'crewLink': crew['link'], 'crewKey': crewKey})
           
           data.append({'raceID': f"{regatta}/{raceNum}",
-                      'regatta': regatta,
+                       'adjusted_raceID': f"{regatta}/{raceNum}",
+                      'Regatta': regatta,
                       'raceNum': raceNum, 'round': round,
-                      'date': date,
+                      'Date': date,
                       'Venue': host,
+                      'Scoring' : 'team',
                       'allSkipperKeys': allSkipperKeys,
                       'allCrewKeys': allCrewKeys,
                       'teamAName': teamAName,
@@ -398,8 +401,10 @@ def scrapeTR():
   df_totalSailors2 = df_totalSailors2.reset_index(drop=True)
   df_totalSailors2.to_json("trSailorInfoAll.json", index=False)
 
-  from datetime import date
   df_final.to_json(f"TR-{date.today().strftime("%Y%m%d")}.json", index=False,date_format='iso')
   df_final.to_json(f"racesTR.json", index=False,date_format='iso')
   
-  return df_final, df_totalSailors2
+  return df_final
+
+if __name__ == "__main__":
+    scrapeTR()
