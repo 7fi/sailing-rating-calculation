@@ -278,3 +278,160 @@ def calculateSailorRanks(people : dict[str,Sailor], config : Config):
         s.womenCrewRankTR = i + 1
     
     return people
+
+def getCounts(races):
+    # season_counts = defaultdict(int)
+    season_counts = {}
+
+    for race in races:
+        season = race["raceID"].split("/")[0]
+        if season not in season_counts.keys():
+            season_counts[season] = {}
+        if race['pos'] not in season_counts[season].keys():
+            season_counts[season][race['pos']] = 0
+        season_counts[season][race['pos']] += 1
+
+    return dict(season_counts)
+
+def uploadSailors(people, cursor, connection, config : Config, batch_size=300):
+    
+    # eligible = [p for p in people.values() if (targetSeasons[-1] in p.seasons['skipper']
+    #                                            or targetSeasons[-1] in p.seasons['crew'])
+    #             and len(p.races) > 0
+    #             and type(p.races[-1]['date']) != type("hi")
+    #             and (today - p.races[-1]['date']).days < 14]
+    eligible = list(people.values())
+    print(len(eligible))
+
+    sailor_rows = []
+    rival_rows = []
+    sailor_teams_rows = []
+
+    for i, p in enumerate(eligible):
+        if p.key is None:
+            print("No key for", p.name)
+            continue
+
+        avg_sk = 0 if p.avgSkipperRatio is None or np.isnan(p.avgSkipperRatio) else p.avgSkipperRatio
+        avg_cr = 0 if p.avgCrewRatio is None or np.isnan(p.avgCrewRatio) else p.avgCrewRatio
+
+        sailor_rows.append((
+            p.key.replace("/", "-"),
+            p.name,
+            p.gender,
+            int(p.sr.ordinal(target=config.targetElo, alpha=200 / config.model.sigma)),
+            int(p.cr.ordinal(target=config.targetElo, alpha=200 / config.model.sigma)),
+            int(p.wsr.ordinal(target=config.targetElo, alpha=200 / config.model.sigma)),
+            int(p.wcr.ordinal(target=config.targetElo, alpha=200 / config.model.sigma)),
+            int(p.tsr.ordinal(target=config.targetElo, alpha=200 / config.model.sigma)),
+            int(p.tcr.ordinal(target=config.targetElo, alpha=200 / config.model.sigma)),
+            int(p.wtsr.ordinal(target=config.targetElo, alpha=200 / config.model.sigma)),
+            int(p.wtcr.ordinal(target=config.targetElo, alpha=200 / config.model.sigma)),
+            int(p.skipperRank),
+            int(p.crewRank),
+            int(p.womenSkipperRank),
+            int(p.womenCrewRank),
+            int(p.skipperRankTR),
+            int(p.crewRankTR),
+            int(p.womenSkipperRankTR),
+            int(p.womenCrewRankTR),
+            avg_sk,
+            avg_cr,
+            p.year
+        ))
+        
+        raceCounts = (lambda rc_norm, ps: {
+                        'skipper': {season: rc_norm.get(season, {}).get('Skipper', 0) for season in [s[0] for s in list(ps['skipper'])]},
+                        'crew': {season: rc_norm.get(season, {}).get('Crew', 0) for season in [s[0] for s in list(ps['crew'])]}
+                    })( (lambda rc: {s: {pos.title(): cnt for pos, cnt in posd.items()} for s, posd in rc.items()})(getCounts(p.races)), p.seasons ) 
+
+        for position in ['Skipper', 'Crew']:
+            if position not in p.rivals:
+                continue
+            for key, values in p.rivals[position].items():
+                for season in values['races']:
+                    rival_rows.append((
+                        p.key.replace("/", "-"),
+                        key,
+                        values['name'],
+                        values['team'],
+                        position,
+                        season,
+                        values['races'][season],
+                        values['wins'][season]
+                    ))
+                    
+        for position in ['skipper', 'crew']:
+            if p.key is None:
+                continue
+            for season, team in set(p.seasons[position]):
+                sailor_teams_rows.append((
+                    p.key.replace("/", "-"),
+                    team,
+                    season,
+                    position,
+                    raceCounts[position][season]
+                ))
+
+        # Commit in batches
+        if (i + 1) % batch_size == 0:
+            print(f"Uploading sailors {i - batch_size + 1} to {i}...", len(sailor_teams_rows))
+            cursor.executemany("""
+                INSERT IGNORE INTO Sailors (
+                    sailorID, name, gender, sr, cr, wsr, wcr, tsr, tcr, wtsr, wtcr,
+                    sRank, cRank, wsRank, wcRank, tsRank, tcRank, wtsRank, wtcRank,
+                    avgSkipperRatio, avgCrewRatio, year
+                )
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            """, sailor_rows)
+            sailor_rows.clear()
+
+            if rival_rows:
+                cursor.executemany("""
+                    INSERT IGNORE INTO SailorRivals (
+                        sailorID, rivalID, rivalName, rivalTeam, position, season, raceCount, winCount
+                    )
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                """, rival_rows)
+                rival_rows.clear()
+            
+            if sailor_teams_rows:
+                try:
+                    cursor.executemany("""
+                        INSERT IGNORE INTO SailorTeams(sailorID, teamID, season, position, raceCount)
+                        VALUES(%s,%s,%s,%s,%s)
+                    """, sailor_teams_rows)
+                    sailor_teams_rows.clear()
+                except Exception as e:
+                    print(sailor_teams_rows)
+                    raise e
+
+            connection.commit()
+
+    # Final flush
+    if sailor_rows:
+        cursor.executemany("""
+                INSERT IGNORE INTO Sailors (
+                    sailorID, name, gender, sr, cr, wsr, wcr, tsr, tcr, wtsr, wtcr,
+                    sRank, cRank, wsRank, wcRank, tsRank, tcRank, wtsRank, wtcRank,
+                    avgSkipperRatio, avgCrewRatio, year
+                )
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            """, sailor_rows)
+        connection.commit()
+    if rival_rows:
+        cursor.executemany("""
+                    INSERT INTO SailorRivals (
+                        sailorID, rivalID, rivalName, rivalTeam, position, season, raceCount, winCount
+                    )
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                """, rival_rows)
+    if sailor_teams_rows:
+        cursor.executemany("""
+                INSERT IGNORE INTO SailorTeams(sailorID, teamID, season, position, raceCount)
+                VALUES(%s,%s,%s,%s,%s)
+            """, sailor_teams_rows)
+
+        connection.commit()
+
+    print("✅ All sailors uploaded successfully!")

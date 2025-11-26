@@ -5,13 +5,16 @@ from dataScraper import runSailorData
 from calculationsFR import calculateFR
 from calculationsTR import calculateTR
 
-from Sailors import Sailor, setupPeople, handleMerges, outputSailorsToFile, calculateSailorRanks
+from Sailors import Sailor, setupPeople, handleMerges, outputSailorsToFile, calculateSailorRanks, uploadSailors
 from config import Config
 
 import pandas as pd
 import numpy as np
 import time
 from datetime import datetime, timedelta
+import mysql.connector
+from dotenv import load_dotenv
+import os
 
 def getScoring(regatta_data):
     scoring = ""
@@ -111,8 +114,26 @@ def calculateAllRaces(people, df_races, config: Config):
                     calculateFR(people, date, regatta_name, race, row, pos, scoring, season, regattaAvg, womens, config)
     return people, df_races
 
+def upload(people : dict[str, Sailor], config: Config):
+    # Create a connection
+    connection = mysql.connector.connect(
+        host=os.getenv('DB_HOST'),
+        port=os.getenv('DB_PORT'),
+        user=os.getenv('DB_USER'),
+        password=os.getenv('DB_PASS'),
+        database=os.getenv('DB_NAME')
+    )
+    cursor = connection.cursor()
+
+    uploadSailors(people, cursor, connection, config)
+    
+    
+    cursor.close()
+    connection.close()
 
 def main():
+    load_dotenv()
+    
     config : Config = Config()
     if config.doScrape:
         df_races_fr = runFleetScrape() 

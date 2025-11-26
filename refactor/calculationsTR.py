@@ -49,12 +49,12 @@ def getTeamVals(row, people : dict[str, Sailor], rowVal : str, rowBoatVal : str,
     teamName = row[rowVal].iat[0]
     teamKeys = [boat[pos.lower() + 'Key'] if boat[pos.lower() + 'Key']
                  is not None else 'Unknown' for boat in row[rowBoatVal].iat[0]]
-    # teamANames = [boat[type.lower() + 'Name'] for boat in row[rowBoatVal].iat[0]]
     for oldkey, newkey in config.merges.items():
         if oldkey in teamKeys:
             teamKeys = [k if k != oldkey else newkey for k in teamKeys]
+            
     teamRacers = [people[key]
-                   for key in teamKeys if 'Unknown' not in key and key in people.keys()]
+                   for key in teamKeys if key != 'Unknown' and key in people.keys()]
     
     teamRatings = [r.getRating(pos, 'team', womens) for r in teamRacers]
     
