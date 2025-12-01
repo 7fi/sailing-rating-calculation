@@ -62,7 +62,7 @@ def updateCrossLinks(sailor, isCross, regions, race, config : Config):
     
     return outLinks
 
-def updateRaces(scores, racers, scoreVals, predictions, partnerKeys, partnerNames, startingRating, ratings, teams, race, scoring, season, date, womens, regattaAvg, pos, config : Config):
+def updateRaces(scores, racers, scoreVals, predictions, partnerKeys, partnerNames, startingRating, ratings, teams, teamBoatNames, race, scoring, season, date, womens, regattaAvg, pos, config : Config):
     if pos.lower() not in ['skipper', 'crew']:
         print("Pos is weird value in updateRaces ", pos)
     venue = scores['Venue'].iat[0]
@@ -77,7 +77,7 @@ def updateRaces(scores, racers, scoreVals, predictions, partnerKeys, partnerName
     isCross = True if len(set(regions)) > 1 else False
 
     # Loop through each sailor and the associated values
-    for sailor, score, pred, partnerKey, partnerName, oldRating, new_rating, team in zip(racers, scoreVals, predictions, partnerKeys, partnerNames, startingRating, ratings, teams):
+    for sailor, score, pred, partnerKey, partnerName, oldRating, new_rating, team, teamBoatName in zip(racers, scoreVals, predictions, partnerKeys, partnerNames, startingRating, ratings, teams, teamBoatNames):
 
         outLinks = updateCrossLinks(sailor, isCross, regions, race, config)
 
@@ -85,7 +85,7 @@ def updateRaces(scores, racers, scoreVals, predictions, partnerKeys, partnerName
 
         updateRivals(sailor, season, score, racers, scoreVals, pos)
 
-        ratingpos = ('w' if womens else '') + ('s' if pos.lower() == 'skipper' else 'c') + 'r'
+        ratingType = ('w' if womens else '') + ('s' if pos.lower() == 'skipper' else 'c') + 'r'
         
         # add race to each sailor's score
         sailor.races.append({
@@ -97,7 +97,7 @@ def updateRaces(scores, racers, scoreVals, predictions, partnerKeys, partnerName
             'regAvg': regattaAvg,
             'cross': isCross,
             'outLinks': outLinks,
-            'ratingpos': ratingpos,
+            'ratingType': ratingType,
             'oldRating': oldRating,
             'newRating': new_rating[0].ordinal(target=config.targetElo, alpha=200 / config.model.sigma),
             'womens': womens,
@@ -105,8 +105,9 @@ def updateRaces(scores, racers, scoreVals, predictions, partnerKeys, partnerName
             'partner': {'name': partnerName, 'key': partnerKey},
             'venue': venue,
             'raceID': actualID,
-            'pos': 'fleet',
-            'scoring': scoring
+            'type': 'fleet',
+            'scoring': scoring,
+            'boatName': teamBoatName
         })
         
 def getPartners(scores, config : Config):
@@ -139,6 +140,7 @@ def calculateFR(people : dict[str, Sailor], date, regatta, race, row, pos, scori
     scores = row[row['Position'] == pos]
     keys = scores['key']  # the sailor keys
     teams = scores['Team']  # the sailors team
+    teamBoatNames = scores['TeamBoatName']  # the sailors team
     scoreVals = list(scores['Score'])  # the score values
 
     # check for invalid race conditions
@@ -161,4 +163,4 @@ def calculateFR(people : dict[str, Sailor], date, regatta, race, row, pos, scori
 
     updateRatings(racers, ratings, pos, womens)
     
-    updateRaces(scores, racers, scoreVals, predictions, partnerKeys, partnerNames, startingRating, ratings, teams, race, scoring, season, date, womens, regattaAvg, pos, config)
+    updateRaces(scores, racers, scoreVals, predictions, partnerKeys, partnerNames, startingRating, ratings, teams, teamBoatNames, race, scoring, season, date, womens, regattaAvg, pos, config)

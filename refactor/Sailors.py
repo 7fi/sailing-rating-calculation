@@ -15,7 +15,7 @@ class Sailor:
     gender : str
     year : str
     links : str
-    teams : str
+    teams : list[str]
 
     seasons : dict[str, list[dict]]
     races : list[dict]
@@ -26,6 +26,7 @@ class Sailor:
     cr : PlackettLuceRating
     wsr : PlackettLuceRating
     wcr : PlackettLuceRating
+    
     # Team racing
     tsr : PlackettLuceRating
     tcr : PlackettLuceRating
@@ -58,9 +59,16 @@ class Sailor:
         prefix += 't' if typ == 'team' else ''
         part = 's' if pos == 'skipper' else 'c'
         return getattr(self, f"{prefix}{part}r")
+    
+    def getSeasonRaceCount(self, season, pos):
+        return len([r for r in self.races if r['raceID'].split("/")[0] == season and r['pos'].lower() == pos.lower()])
+    
+    def isOnTeamInSeasons(self, team, seasons):
+        return team in [t for [s, t] in self.seasons['skipper'] if s in seasons]
       
     def hasTargetSeasons(self, targetSeasons, pos):
-        return not set([s[0] for s in self.seasons[pos]]).isdisjoint(targetSeasons)
+        seasonsSet = set([s[0] for s in self.seasons[pos]])
+        return not seasonsSet.isdisjoint(targetSeasons)
     
     def isRankEligible(self, targetSeasons, pos, gradCutoff, needsOutlinks=True):
         return not (self.hasTargetSeasons(targetSeasons, pos) # has target seasons

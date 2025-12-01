@@ -22,7 +22,7 @@ def getRaceNums(oldNums, scoresLen):
                 newNums.append(int(num[0]))
     return newNums
 
-def makeRaceSeries(score, team, raceNum, division, name, link, gradYear, position, partner, partnerLink, venue, regatta, date, teamlink, scoring, boat):
+def makeRaceSeries(score, team, raceNum, division, name, link, gradYear, position, partner, partnerLink, venue, regatta, date, teamlink, scoring, boat, teamBoatName):
     raceSeries = pd.Series()
     raceSeries["Score"] = score
     raceSeries["Div"] = division
@@ -44,6 +44,7 @@ def makeRaceSeries(score, team, raceNum, division, name, link, gradYear, positio
     raceSeries["Team"] = team
     raceSeries["Teamlink"] = teamlink
     raceSeries["Boat"] = boat
+    raceSeries["TeamBoatName"] = teamBoatName
     return raceSeries
 
 async def cleanup_semaphore(semaphore):
@@ -139,7 +140,7 @@ def parseScore(scoreString):
     elif scoreString.has_attr('title'):
         return int(scoreString['title'][1:-1].split(",")[0].split(":")[0])
 
-def addRaces(finalRaces, teamScores, sailors, others, pos, teamHome, host, regatta, teamLink, scoring, boat_type, raceDate):
+def addRaces(finalRaces, teamScores, sailors, others, pos, teamHome, host, regatta, teamLink, scoring, boat_type,teamBoatName, raceDate):
     for sailor in sailors:
         partners = [other['name'] for race in sailor['races'] for other in others if other['div'] == sailor['div'] and race in other['races']]
         partnerLinks = [other['link'] for race in sailor['races'] for other in others if other['div'] == sailor['div'] and race in other['races']]
@@ -147,7 +148,7 @@ def addRaces(finalRaces, teamScores, sailors, others, pos, teamHome, host, regat
             if i + 1 in sailor['races']:
                 partner = partners[sailor['races'].index(i + 1)] if sailor['races'].index(i + 1) < len(partners) else "Unknown"
                 partnerLink = partnerLinks[sailor['races'].index(i + 1)] if sailor['races'].index(i + 1) < len(partners) else "Unknown"
-                finalRaces.append(makeRaceSeries(score, teamHome, i + 1, sailor['div'], sailor['name'], sailor['link'],sailor['year'], pos, partner, partnerLink, host,regatta, raceDate, teamLink, scoring, boat_type))
+                finalRaces.append(makeRaceSeries(score, teamHome, i + 1, sailor['div'], sailor['name'], sailor['link'],sailor['year'], pos, partner, partnerLink, host,regatta, raceDate, teamLink, scoring, boat_type, teamBoatName))
 
 
 def processData(soup):
@@ -310,8 +311,8 @@ def processData(soup):
                                     crew['races'].remove(i+1)
         
         # update skippers and crews once all rows for a team are done.
-        addRaces(finalRaces, teamScores, skippers, crews, 'Skipper', teamHome, host, regatta, teamLink, scoring, boat_type, raceDate)
-        addRaces(finalRaces, teamScores, crews, skippers, 'Crew', teamHome, host, regatta, teamLink, scoring, boat_type, raceDate)
+        addRaces(finalRaces, teamScores, skippers, crews, 'Skipper', teamHome, host, regatta, teamLink, scoring, boat_type, teamName, raceDate)
+        addRaces(finalRaces, teamScores, crews, skippers, 'Crew', teamHome, host, regatta, teamLink, scoring, boat_type,teamName, raceDate)
         skippers = []
         crews = []
         
@@ -375,13 +376,13 @@ def runFleetScrape():
     
     # seasons = ['f25']
 
-    df_races = pd.DataFrame()
-    try:
-        print("attempting to read from file")
-        df_races = pd.read_json("racesfr.json") 
-        print("read from file")
-    except:
-        df_races = pd.DataFrame(columns=["Score", "Div", "Sailor", "Link", "key", "GradYear", "Position", "Partner", "Venue", "Regatta", "Scoring", "raceID","adjusted_raceID", "Date", "raceNum", "Team", "Teamlink", "Boat"]) 
+    # df_races = pd.DataFrame()
+    # try:
+    #     print("attempting to read from file")
+    #     df_races = pd.read_json("racesfr.json") 
+    #     print("read from file")
+    # except:
+    df_races = pd.DataFrame(columns=["Score", "Div", "Sailor", "Link", "key", "GradYear", "Position", "Partner", "Venue", "Regatta", "Scoring", "raceID", "adjusted_raceID", "Date", "raceNum", "Team", "Teamlink", "Boat", "TeamBoatName"]) 
 
     racesRegattas = df_races['Regatta'].unique()
     
@@ -409,7 +410,7 @@ def runFleetScrape():
             if (scoring == "3 Divisions" or scoring == "2 Divisions" or scoring == "Combined") and scrape:
                 regattas[season + "/" + link['href']] = {"link":season + "/" + link['href'], "scoring":scoring, 'rescrape': rescrape, 'date': regatta_date}
 
-    # regattas = {'f24/ucsd-frosh-soph' : {'link':'f24/ucsd-frosh-soph','scoring':'2 Divisions', 'rescrape' : True, 'date': ''}}
+    # regattas = {'f25/oberg' : {'link':'f25/oberg','scoring':'3 Divisions', 'rescrape' : True, 'date': ''}}
 
     if len(regattas.values()) > 0:
         totalRows = asyncio.run(main(regattas))
@@ -417,6 +418,7 @@ def runFleetScrape():
         df_races = pd.concat([df_races, pd.DataFrame(totalRows)])
         df_races = df_races.drop_duplicates(subset=['raceID', 'Sailor'], keep='last').reset_index(drop=True)
         df_races.to_json(f"racesfr.json", index=False, date_format='iso')
+        # df_races.to_json(f"racesfrtest.json", index=False, date_format='iso')
         # df_races.to_json(f"racesfr-{date.today().strftime("%Y%m%d")}.json", index=False, date_format='iso')
         # if len(totalRows) > 0:
         #     df_races_new = pd.DataFrame(totalRows)

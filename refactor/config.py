@@ -20,6 +20,8 @@ class Config:
         'Emma Cole-Northeastern': 'emma-cole',
         'Nathalie Caudron-Northeastern': 'nathalie-caudron'
     }
+    numTops : ClassVar[dict[str, int]] = {'open': 3, 'womens': 2}
+    
     doScrape : bool = False
     calcAll : bool = True
-    doUpload : bool = False
+    doUpload : bool = True

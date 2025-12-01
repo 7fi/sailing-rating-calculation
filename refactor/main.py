@@ -5,6 +5,9 @@ from dataScraper import runSailorData
 from calculationsFR import calculateFR
 from calculationsTR import calculateTR
 
+from uploadScores import uploadScoresBySailor
+from Teams import uploadTeams
+
 from Sailors import Sailor, setupPeople, handleMerges, outputSailorsToFile, calculateSailorRanks, uploadSailors
 from config import Config
 
@@ -112,7 +115,7 @@ def calculateAllRaces(people, df_races, config: Config):
                     calculateTR(people, date, row, pos, season, regattaAvg, womens, config)
                 else:
                     calculateFR(people, date, regatta_name, race, row, pos, scoring, season, regattaAvg, womens, config)
-    return people, df_races
+    return people
 
 def upload(people : dict[str, Sailor], config: Config):
     # Create a connection
@@ -125,8 +128,9 @@ def upload(people : dict[str, Sailor], config: Config):
     )
     cursor = connection.cursor()
 
-    uploadSailors(people, cursor, connection, config)
-    
+    # uploadSailors(people, cursor, connection, config)
+    uploadTeams(people, cursor, connection, config)
+    # uploadScoresBySailor(people, cursor, connection)
     
     cursor.close()
     connection.close()
@@ -141,9 +145,9 @@ def main():
         df_sailor_info = runSailorData()
     else: 
         print("Reading from files.")
-        df_races_fr = pd.read_json("racesfr.json")
-        df_races_tr = pd.read_json("racesTR.json")
-        df_sailor_info = pd.read_json("sailor_data2.json")
+        df_races_fr = pd.read_json("../racesfr.json")
+        df_races_tr = pd.read_json("../racesTR.json")
+        df_sailor_info = pd.read_json("../sailor_data2.json")
         
     df_races_full = pd.concat([df_races_fr, df_races_tr])
     
@@ -162,13 +166,18 @@ def main():
 
     people = setupPeople(df_sailor_ratings, df_sailor_info, config)
     people, df_races_full = handleMerges(df_races_full, people, config)
-    print(len(people))
-    people, df_races_full = calculateAllRaces(people, df_races_full, config)
+    people = calculateAllRaces(people, df_races_full, config)
     people = calculateSailorRanks(people, config)
     
     print("Calculations finished.\nOutputting to files")
     
+    return people
     outputSailorsToFile(people, config)
+    
+    print("File output finished.")
+    if config.doUpload:
+        print("Uploading to db")
+        upload(people, config)
 
 if __name__ == "__main__":
     start = time.time()
