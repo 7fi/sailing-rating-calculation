@@ -171,7 +171,7 @@ def main():
     
     print("Calculations finished.\nOutputting to files")
     
-    return people
+    return people, df_races_full
     outputSailorsToFile(people, config)
     
     print("File output finished.")

@@ -139,6 +139,9 @@ def uploadTeams(people: dict[str, Sailor], cursor, connection, config: Config):
         avg = calculateAvgRating(currentSailors, config)
         avgRatio = calculateAvgRatio(currentSailors)
         if(team == 'Northeastern'):
+            print(len(sailors), len(currentSailors))
+            for s in currentSailors:
+                print(s)
             print(topSkippers, topWomenSkippers,topSkippersTR, topWomenSkippersTR, topCrews, topWomenCrews, topCrewsTR, topWomenCrewsTR)
             print(team, topRating, topWomenRating, topRatingTR, topWomenRatingTR, avg, avgRatio)
         

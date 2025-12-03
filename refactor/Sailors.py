@@ -64,7 +64,7 @@ class Sailor:
         return len([r for r in self.races if r['raceID'].split("/")[0] == season and r['pos'].lower() == pos.lower()])
     
     def isOnTeamInSeasons(self, team, seasons):
-        return team in [t for [s, t] in self.seasons['skipper'] if s in seasons]
+        return team in [t for [s, t] in self.seasons['skipper'] if s in seasons] or team in [t for [s, t] in self.seasons['crew'] if s in seasons]
       
     def hasTargetSeasons(self, targetSeasons, pos):
         seasonsSet = set([s[0] for s in self.seasons[pos]])
@@ -89,7 +89,8 @@ class Sailor:
         self.womenCrewRankTR = 0
         
     def __repr__(self):
-        return f"{self.name}: {self.teams}, {str(self.sr.ordinal(target=self.config.targetElo, alpha=self.config.alpha))} {str(self.cr.ordinal(target=self.config.targetElo, alpha=self.config.alpha))} {self.seasons} {len(self.races)}"
+        config = Config()
+        return f"{self.name}: {self.teams}, {str(self.sr.ordinal(target=config.targetElo, alpha=config.alpha))} {str(self.tsr.ordinal(target=config.targetElo, alpha=config.alpha))} {self.seasons} {len(self.races)}"
     
 
 

@@ -13,11 +13,11 @@ def setup():
   seasons = [sub for s in seasons for sub in s] + ['s25']
   # seasons = ['s24']
 
-  df_old = pd.DataFrame()
-  try:
-    df_old = pd.read_json("racesTR.json")
-  except:
-      df_old = pd.DataFrame(columns=['raceID','regatta','raceNum', 'round','Date','allSkipperKeys','allCrewKeys','teamAName','teamAUni','teamANick','teamALink','teamAID','teamABoats','teamAScore','teamAOutcome','teamBName','teamBUni','teamBNick','teamBLink','teamBID','teamBBoats','teamBScore','teamBOutcome'])
+#   df_old = pd.DataFrame()
+#   try:
+#     df_old = pd.read_json("racesTR.json")
+#   except:
+  df_old = pd.DataFrame(columns=['raceID', 'adjusted_raceID', 'Regatta', 'raceNum', 'Date', 'Venue', 'Scoring', 'allSkipperKeys', 'allCrewKeys', 'teamAName', 'teamAUni', 'teamANick', 'teamALink', 'teamAID', 'teamABoats', 'teamAScore', 'teamAOutcome', 'teamBName', 'teamBUni', 'teamBNick', 'teamBLink', 'teamBID', 'teamBBoats', 'teamBScore', 'teamBOutcome'])
 
   regattas = {}
 
@@ -39,7 +39,7 @@ def setup():
       if rescrape:
           print(link['href'], regatta_date)
           
-      scrape = (season + "/" + link['href']) not in df_old['regatta'].unique() or rescrape
+      scrape = (season + "/" + link['href']) not in df_old['Regatta'].unique() or rescrape
       if (scoring == "Team") and scrape:
           regattas[season + "/" + link['href']] = {"link":season + "/" + link['href'], "scoring": scoring, 'rescrape': rescrape}
   print(len(regattas))
@@ -218,7 +218,7 @@ def makeSailorList(sailorData, regatta):
                                           'opponentFull': opponentFull,
                                           'oppID': oppID,
                                           'partner': crewName,
-                                          'regatta': regatta
+                                          'Regatta': regatta
                                           })
                   
                   sailorRaceList.append({'name': crewName,
@@ -232,7 +232,7 @@ def makeSailorList(sailorData, regatta):
                                           'opponentFull': opponentFull,
                                           'oppID': oppID,
                                           'partner': skipperName,
-                                          'regatta': regatta
+                                          'Regatta': regatta
                                           })
                     
   return sailorRaceList
