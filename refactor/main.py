@@ -29,7 +29,7 @@ def getScoring(regatta_data):
 
 def getWomensAndRegAvgFR(people, regatta_data, config: Config):
     skipper_keys = regatta_data.loc[regatta_data['Position'] == 'Skipper']['key'].unique()
-    skippers = [people[k] for k in skipper_keys]
+    skippers = [people[k] for k in skipper_keys if k in people.keys()]
 
     crew_keys = regatta_data.loc[regatta_data['Position'] == 'Crew']['key'].unique()
     crews = [people[k] for k in crew_keys if k in people.keys()]
@@ -128,39 +128,46 @@ def upload(people : dict[str, Sailor], config: Config):
     )
     cursor = connection.cursor()
 
-    # uploadSailors(people, cursor, connection, config)
+    uploadSailors(people, cursor, connection, config)
     uploadTeams(people, cursor, connection, config)
-    # uploadScoresBySailor(people, cursor, connection)
+    uploadScoresBySailor(people, cursor, connection)
     
     cursor.close()
     connection.close()
-
-def main():
+    
+def load(rootDir : str, config: Config):
     load_dotenv()
     
-    config : Config = Config()
     if config.doScrape:
         df_races_fr = runFleetScrape() 
         df_races_tr = scrapeTR()
         df_sailor_info = runSailorData()
     else: 
         print("Reading from files.")
-        df_races_fr = pd.read_json("../racesfr.json")
-        df_races_tr = pd.read_json("../racesTR.json")
-        df_sailor_info = pd.read_json("../sailor_data2.json")
+        df_races_fr = pd.read_json(rootDir + "racesfr.json")
+        df_races_tr = pd.read_json(rootDir + "racesTR.json")
+        df_sailor_info = pd.read_json(rootDir + "sailor_data2.json")
         
     df_races_full = pd.concat([df_races_fr, df_races_tr])
     
     # clean up memory
     del df_races_fr, df_races_tr
-
+    
     df_races_full = df_races_full.sort_values(['Date', 'raceNum', 'Div']).reset_index(drop=True)    
     
     df_sailor_ratings = None
     if not config.calcAll:
         cutoff = (datetime.now() - timedelta(weeks=2))
         df_races_full = df_races_full.loc[df_races_full['Date'] > cutoff]
-        df_sailor_ratings = pd.read_json("sailors-latest.json")
+        df_sailor_ratings = pd.read_json(rootDir + "sailors-latest.json")
+    
+    return df_races_full, df_sailor_info, df_sailor_ratings
+
+def main(rootDir : str = ""):
+    
+    config : Config = Config()
+
+    df_races_full, df_sailor_info, df_sailor_ratings = load(rootDir, config)
 
     print("Setup complete.\nStarting calculations.")
 
@@ -171,7 +178,7 @@ def main():
     
     print("Calculations finished.\nOutputting to files")
     
-    return people, df_races_full
+    # return people, df_races_full # used for jupyter notebook
     outputSailorsToFile(people, config)
     
     print("File output finished.")

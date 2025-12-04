@@ -2,19 +2,18 @@ from config import Config
 from calculationsFR import updateSeasons
 from Sailors import Sailor
 
-def updateRatings(womens, teamARacers, teamBRacers, ratings, pos):
-    for team, newRatings in zip([teamARacers, teamBRacers], ratings):
-        for racer, new_rating in zip(team, newRatings):
-            if pos == 'Skipper':
-                if womens:
-                    racer.wtsr = new_rating
-                else:
-                    racer.tsr = new_rating
+def updateRatings(womens, racers, ratings, pos):
+    for racer, new_rating in zip(racers, ratings):
+        if pos == 'Skipper':
+            if womens:
+                racer.wtsr = new_rating
             else:
-                if womens:
-                    racer.wtcr = new_rating
-                else:
-                    racer.tcr = new_rating
+                racer.tsr = new_rating
+        else:
+            if womens:
+                racer.wtcr = new_rating
+            else:
+                racer.tcr = new_rating
 
 def updateRivals(racer, oppRacers, season, pos, toutcome):
     for opp in oppRacers:
@@ -79,7 +78,8 @@ def updateRacesForTeam(tLetter, index, racers, oppRacers, boats, starting, teamN
 
         updateSeasons(racer, season, teamName, pos)
 
-        ratingType = 'wtsr' if womens else 'tsr' if pos == 'Skipper' else 'wtcr' if womens else 'tcr'
+        ratingType = 'wt' if womens else 't'
+        ratingType += 'sr' if pos == 'Skipper' else 'cr'
         
         racer.races.append({
             'raceID': row['raceID'].iat[0], 'raceNum': int(row['raceNum'].iat[0]), 'round':  row['round'].iat[0],
@@ -119,6 +119,9 @@ def calculateTR(people : dict[str, Sailor], date : str, row, pos : str, season :
     predictions = config.model.predict_rank([teamARatings, teamBRatings])
 
     teamARatings, teamBRatings = config.model.rate([teamARatings, teamBRatings],ranks=ranks)
+    
+    updateRatings(womens, teamARacers, teamARatings, pos)
+    updateRatings(womens, teamBRacers, teamBRatings, pos)
     
     updateRacesForTeam('A', 0, teamARacers, teamBRacers, row['teamABoats'].iat[0], startingARating, teamAName, pos, season, womens, row, date, predictions, venue, regattaAvg, teamARatings, config)
     

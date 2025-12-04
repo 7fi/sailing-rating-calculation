@@ -13,11 +13,11 @@ def setup():
   seasons = [sub for s in seasons for sub in s] + ['s25']
   # seasons = ['s24']
 
-#   df_old = pd.DataFrame()
-#   try:
-#     df_old = pd.read_json("racesTR.json")
-#   except:
-  df_old = pd.DataFrame(columns=['raceID', 'adjusted_raceID', 'Regatta', 'raceNum', 'Date', 'Venue', 'Scoring', 'allSkipperKeys', 'allCrewKeys', 'teamAName', 'teamAUni', 'teamANick', 'teamALink', 'teamAID', 'teamABoats', 'teamAScore', 'teamAOutcome', 'teamBName', 'teamBUni', 'teamBNick', 'teamBLink', 'teamBID', 'teamBBoats', 'teamBScore', 'teamBOutcome'])
+  df_old = pd.DataFrame()
+  try:
+    df_old = pd.read_json("racesTR.json")
+  except:
+    df_old = pd.DataFrame(columns=['raceID', 'adjusted_raceID', 'Regatta', 'raceNum', 'Date', 'Venue', 'Scoring', 'allSkipperKeys', 'allCrewKeys', 'teamAName', 'teamAUni', 'teamANick', 'teamALink', 'teamAID', 'teamABoats', 'teamAScore', 'teamAOutcome', 'teamBName', 'teamBUni', 'teamBNick', 'teamBLink', 'teamBID', 'teamBBoats', 'teamBScore', 'teamBOutcome'])
 
   regattas = {}
 

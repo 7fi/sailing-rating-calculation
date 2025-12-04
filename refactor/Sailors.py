@@ -71,7 +71,7 @@ class Sailor:
         return not seasonsSet.isdisjoint(targetSeasons)
     
     def isRankEligible(self, targetSeasons, pos, gradCutoff, needsOutlinks=True):
-        return not (self.hasTargetSeasons(targetSeasons, pos) # has target seasons
+        return (self.hasTargetSeasons(targetSeasons, pos) # has target seasons
                         # and has 70 outlinks   
                         and sum([race['outLinks'] 
                                 for race in self.races if 'outLinks' in race.keys()]) > 70 if needsOutlinks else True

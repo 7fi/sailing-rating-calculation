@@ -61,7 +61,6 @@ def uploadScoresBySailor(people : dict[str,Sailor], cursor, connection, batch_si
                     race['regAvg']
                 ])
     
-    # Function to insert in batches
     def batch_insert(cursor, table_name, columns, data):
         for start in range(0, len(data), batch_size):
             print("Inserting", start, "/", len(data))
@@ -86,8 +85,8 @@ def uploadScoresBySailor(people : dict[str,Sailor], cursor, connection, batch_si
     print("Inserting FleetScores...")
     batch_insert(cursor, "FleetScores", fleet_columns, fleet_rows)
     
-    # print("Inserting TRScores...")
-    # batch_insert(cursor, "TRScores", team_columns, team_rows)
+    print("Inserting TRScores...")
+    batch_insert(cursor, "TRScores", team_columns, team_rows)
     
     # Update homepage stats
     cursor.execute("""

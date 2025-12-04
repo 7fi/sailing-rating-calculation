@@ -376,13 +376,13 @@ def runFleetScrape():
     
     # seasons = ['f25']
 
-    # df_races = pd.DataFrame()
-    # try:
-    #     print("attempting to read from file")
-    #     df_races = pd.read_json("racesfr.json") 
-    #     print("read from file")
-    # except:
-    df_races = pd.DataFrame(columns=["Score", "Div", "Sailor", "Link", "key", "GradYear", "Position", "Partner", "Venue", "Regatta", "Scoring", "raceID", "adjusted_raceID", "Date", "raceNum", "Team", "Teamlink", "Boat", "TeamBoatName"]) 
+    df_races = pd.DataFrame()
+    try:
+        print("attempting to read from file")
+        df_races = pd.read_json("racesfr.json") 
+        print("read from file")
+    except:
+        df_races = pd.DataFrame(columns=["Score", "Div", "Sailor", "Link", "key", "GradYear", "Position", "Partner", "Venue", "Regatta", "Scoring", "raceID", "adjusted_raceID", "Date", "raceNum", "Team", "Teamlink", "Boat", "TeamBoatName"]) 
 
     racesRegattas = df_races['Regatta'].unique()
     
@@ -419,7 +419,7 @@ def runFleetScrape():
         df_races = df_races.drop_duplicates(subset=['raceID', 'Sailor'], keep='last').reset_index(drop=True)
         df_races.to_json(f"racesfr.json", index=False, date_format='iso')
         # df_races.to_json(f"racesfrtest.json", index=False, date_format='iso')
-        # df_races.to_json(f"racesfr-{date.today().strftime("%Y%m%d")}.json", index=False, date_format='iso')
+        df_races.to_json(f"racesfr-{date.today().strftime("%Y%m%d")}.json", index=False, date_format='iso')
         # if len(totalRows) > 0:
         #     df_races_new = pd.DataFrame(totalRows)
         #     df_races_new.to_json("races_new_fr.json", index=False, date_format='iso')
