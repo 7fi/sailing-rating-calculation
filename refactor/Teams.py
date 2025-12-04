@@ -21,7 +21,7 @@ def getOrderedSailors(people : list[Sailor], ratingType, pos, config : Config):
     numTops = config.numTops['open' if 'w' not in ratingType else 'womens']
     isTR = 't' in ratingType
     orderedSailors = sorted([p for p in people
-                            if p.isRankEligible(config.targetSeasons, pos, config.gradCutoff, isTR)
+                            if p.isRankEligible(config.targetSeasons, pos, config.gradCutoff, not isTR)
                              and getattr(p, ratingType).mu != config.model.mu
                              ],
                             key=lambda x: getattr(x, ratingType).ordinal(
@@ -58,13 +58,13 @@ def getRankType(sailor, season, topSailors, rankTypes, config: Config):
                         rankType = rankType + '.' + rt
     return rankType
     
-def uploadSailorTeams(filtered_people : list[Sailor], team, topSkippers: list[list[dict]], topCrews: list[list[dict]], cursor, connection, config: Config):
+def uploadSailorTeams(filtered_people : list[Sailor], team, topSkippers: list[list[dict]], topCrews: list[list[dict]], connection, config: Config):
     rankTypesSkipper = ['sr', 'wsr', 'tsr', 'wtsr']
     rankTypesCrew = ['cr', 'wcr', 'tcr', 'wtcr']
     
     batch_size = 200
     rows_to_insert = []
-
+    
     for sailor in filtered_people:
         for position, topSailors, rankTypes in zip(['skipper', 'crew'], [topSkippers, topCrews], [rankTypesSkipper, rankTypesCrew]):
             for season, seasonTeam in sailor.seasons[position]:
@@ -83,11 +83,17 @@ def uploadSailorTeams(filtered_people : list[Sailor], team, topSkippers: list[li
     for start in range(0, len(rows_to_insert), batch_size):
         batch = rows_to_insert[start:start + batch_size]
         try:
-            cursor.executemany("""
-                INSERT INTO SailorTeams(sailorID, teamID, season, position, raceCount, rankType)
-                VALUES(%s,%s,%s,%s,%s,%s)
-            """, batch)
+            with connection.cursor() as cursor:
+                cursor.executemany("""
+                    INSERT INTO SailorTeams
+                        (sailorID, teamID, season, position, raceCount, rankType)
+                    VALUES (%s, %s, %s, %s, %s, %s)
+                    ON DUPLICATE KEY UPDATE
+                        raceCount = VALUES(raceCount),
+                        rankType = VALUES(rankType)
+                """, batch)
             connection.commit()
+
         except mysql.connector.errors.IntegrityError as e:
             print("Batch insert failed:", e)
             raise e
@@ -129,9 +135,8 @@ def calculateAvgRating(people : list[Sailor], config:Config):
 
     return sum(ratings) / len(ratings) if len(ratings) > 0 else 0
     
-def uploadTeams(people: dict[str, Sailor], cursor, connection, config: Config):
+def uploadTeams(people: dict[str, Sailor], connection, config: Config):
     for team, region in teamRegions.items():
-        # team = 'Northeastern'
         sailors : list[Sailor] = [p for key, p in people.items() if team in p.teams]
         currentSailors : list[Sailor] = [p for p in sailors if p.isOnTeamInSeasons(team, config.targetSeasons)]
         
@@ -143,17 +148,28 @@ def uploadTeams(people: dict[str, Sailor], cursor, connection, config: Config):
         avg = calculateAvgRating(currentSailors, config)
         avgRatio = calculateAvgRatio(currentSailors)
         
-        # if(team == 'Northeastern'):
-        #     print(len(sailors), len(currentSailors), [s.name for s in currentSailors])
-        #     print(topSkippers, topWomenSkippers, topSkippersTR, topWomenSkippersTR, topCrews, topWomenCrews, topCrewsTR, topWomenCrewsTR)
-        #     print(team, topRating, topWomenRating, topRatingTR, topWomenRatingTR, avg, avgRatio)
+        # if team == 'UC Santa Cruz':
+        #     for s in currentSailors:
+        #         print(s.key, s.getOutLinks())
         
-        cursor.execute("""
-                    INSERT INTO Teams (teamID, teamName, topFleetRating, topWomenRating, topTeamRating, topWomenTeamRating, avgRating, avgRatio, region)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
-            """,   (team, team, topRating, topWomenRating, topRatingTR, topWomenRatingTR, avg, avgRatio, region)) 
+        with connection.cursor() as cursor:
+            cursor.execute("""
+                INSERT INTO Teams
+                    (teamID, teamName, topFleetRating, topWomenRating, topTeamRating,
+                    topWomenTeamRating, avgRating, avgRatio, region)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                ON DUPLICATE KEY UPDATE
+                    topFleetRating = VALUES(topFleetRating),
+                    topWomenRating = VALUES(topWomenRating),
+                    topTeamRating = VALUES(topTeamRating),
+                    topWomenTeamRating = VALUES(topWomenTeamRating),
+                    avgRating = VALUES(avgRating),
+                    avgRatio = VALUES(avgRatio)
+            """, (team, team, topRating, topWomenRating, topRatingTR,
+                topWomenRatingTR, avg, avgRatio, region))
         connection.commit()
+
         
-        uploadSailorTeams(sailors, team, [topSkippers, topWomenSkippers, topSkippersTR, topWomenSkippersTR], [topCrews,topWomenCrews, topCrewsTR, topWomenCrewsTR], cursor, connection, config)
+        uploadSailorTeams(sailors, team, [topSkippers, topWomenSkippers, topSkippersTR, topWomenSkippersTR], [topCrews,topWomenCrews, topCrewsTR, topWomenCrewsTR], connection, config)
         
-        print("inserted team", team)
+        # print("Updated ", team)

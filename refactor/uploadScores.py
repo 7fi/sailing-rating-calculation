@@ -1,5 +1,5 @@
 from Sailors import Sailor
-def uploadScoresBySailor(people : dict[str,Sailor], cursor, connection, batch_size=3000):
+def uploadScoresBySailor(people : dict[str,Sailor], connection, batch_size=3000):
     fleet_rows = []
     team_rows = []
 
@@ -61,13 +61,14 @@ def uploadScoresBySailor(people : dict[str,Sailor], cursor, connection, batch_si
                     race['regAvg']
                 ])
     
-    def batch_insert(cursor, table_name, columns, data):
+    def batch_insert(table_name, columns, data):
         for start in range(0, len(data), batch_size):
             print("Inserting", start, "/", len(data))
             batch = data[start:start + batch_size]
             placeholders = ",".join(["%s"] * len(columns))
             sql = f"INSERT IGNORE INTO {table_name} ({','.join(columns)}) VALUES ({placeholders})"
-            cursor.executemany(sql, batch)
+            with connection.cursor() as cursor:
+                cursor.executemany(sql, batch)
             connection.commit()
             
     
@@ -83,20 +84,21 @@ def uploadScoresBySailor(people : dict[str,Sailor], cursor, connection, batch_si
     ]
     
     print("Inserting FleetScores...")
-    batch_insert(cursor, "FleetScores", fleet_columns, fleet_rows)
+    batch_insert("FleetScores", fleet_columns, fleet_rows)
     
     print("Inserting TRScores...")
-    batch_insert(cursor, "TRScores", team_columns, team_rows)
+    batch_insert("TRScores", team_columns, team_rows)
     
     # Update homepage stats
-    cursor.execute("""
-        UPDATE HomePageStats SET 
-            numSailors = (SELECT COUNT(*) FROM Sailors),
-            numScores = (SELECT COUNT(*) FROM FleetScores) + (SELECT COUNT(*) FROM TRScores),
-            numTeams = (SELECT COUNT(*) FROM Teams)
-        WHERE id = 1;
-    """)
-    
+    with connection.cursor() as cursor:
+        cursor.execute("""
+            UPDATE HomePageStats SET 
+                numSailors = (SELECT COUNT(*) FROM Sailors),
+                numScores = (SELECT COUNT(*) FROM FleetScores) + (SELECT COUNT(*) FROM TRScores),
+                numTeams = (SELECT COUNT(*) FROM Teams)
+            WHERE id = 1;
+        """)
+        
     connection.commit()
     # cursor.close()
     print("Upload complete.")

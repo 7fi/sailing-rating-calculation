@@ -126,13 +126,11 @@ def upload(people : dict[str, Sailor], config: Config):
         password=os.getenv('DB_PASS'),
         database=os.getenv('DB_NAME')
     )
-    cursor = connection.cursor()
 
-    uploadSailors(people, cursor, connection, config)
-    uploadTeams(people, cursor, connection, config)
-    uploadScoresBySailor(people, cursor, connection)
+    uploadSailors(people, connection, config)
+    uploadTeams(people, connection, config)
+    uploadScoresBySailor(people, connection)
     
-    cursor.close()
     connection.close()
     
 def load(rootDir : str, config: Config):
@@ -163,6 +161,15 @@ def load(rootDir : str, config: Config):
     
     return df_races_full, df_sailor_info, df_sailor_ratings
 
+def updateSailorRatios(people: dict[str, Sailor]):
+    for sailor, p in people.items():
+        avgSkipperRatio = float(np.array(
+            [r['ratio'] for r in p.races if r['pos'] == 'Skipper' and 'ratio' in r.keys()]).mean())
+        avgCrewRatio = float(np.array(
+            [r['ratio'] for r in p.races if r['pos'] == 'Crew' and 'ratio' in r.keys()]).mean())
+        p.avgSkipperRatio = avgSkipperRatio
+        p.avgCrewRatio = avgCrewRatio
+
 def main(rootDir : str = ""):
     
     config : Config = Config()
@@ -178,7 +185,10 @@ def main(rootDir : str = ""):
     
     print("Calculations finished.\nOutputting to files")
     
+    updateSailorRatios(people)
+    
     # return people, df_races_full # used for jupyter notebook
+    
     outputSailorsToFile(people, config)
     
     print("File output finished.")

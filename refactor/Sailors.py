@@ -70,11 +70,16 @@ class Sailor:
         seasonsSet = set([s[0] for s in self.seasons[pos]])
         return not seasonsSet.isdisjoint(targetSeasons)
     
+    def getOutLinks(self):
+        return sum([race['outLinks'] for race in self.races if 'outLinks' in race.keys()])
+    
+    def getCrossLinks(self):
+        return len([race for race in self.races if 'cross' in race.keys() and race['cross']])
+    
     def isRankEligible(self, targetSeasons, pos, gradCutoff, needsOutlinks=True):
         return (self.hasTargetSeasons(targetSeasons, pos) # has target seasons
                         # and has 70 outlinks   
-                        and sum([race['outLinks'] 
-                                for race in self.races if 'outLinks' in race.keys()]) > 70 if needsOutlinks else True
+                        and self.getOutLinks() > 70 if needsOutlinks else True
                         # and graduates after the cutoff
                         and (2000 + int(self.year.split()[0]) > gradCutoff 
                                 if isinstance(self.year, str) and len(self.year.split()) > 1 else int(self.year) > gradCutoff))
@@ -180,12 +185,6 @@ def validPerson(p, type, config: Config):
 def outputSailorsToFile(people, config: Config ):
     allRows = []
     for sailor, p in people.items():
-        avgSkipperRatio = float(np.array(
-            [r['ratio'] for r in p.races if r['pos'] == 'Skipper' and 'ratio' in r.keys()]).mean())
-        avgCrewRatio = float(np.array(
-            [r['ratio'] for r in p.races if r['pos'] == 'Crew' and 'ratio' in r.keys()]).mean())
-        p.avgSkipperRatio = avgSkipperRatio
-        p.avgCrewRatio = avgCrewRatio
 
         allRows.append([p.name, len(p.races), sailor,
                         p.skipperRank, p.crewRank, p.womenSkipperRank,
@@ -222,7 +221,7 @@ def outputSailorsToFile(people, config: Config ):
                         p.seasons,
                         sum([race['cross']
                             for race in p.races if 'cross' in race.keys()]),
-                        p.races, p.rivals, avgSkipperRatio, avgCrewRatio])
+                        p.races, p.rivals, p.avgSkipperRatio, p.avgCrewRatio])
 
     df_sailors = pd.DataFrame(allRows, columns=['Sailor', 'numRaces', 'key', 'SkipperRank', 'CrewRank', 'WomenSkipperRank', 'WomenCrewRank', 'TRSkipperRank', 'TRWomenSkipperRank', 'Teams', 'gender',
                                                 'srOrd',
@@ -302,7 +301,7 @@ def getCounts(races):
 
     return dict(season_counts)
 
-def uploadSailors(people, cursor, connection, config : Config, batch_size=300):
+def uploadSailors(people, connection, config : Config, batch_size=300):
     
     # eligible = [p for p in people.values() if (targetSeasons[-1] in p.seasons['skipper']
     #                                            or targetSeasons[-1] in p.seasons['crew'])
@@ -385,31 +384,34 @@ def uploadSailors(people, cursor, connection, config : Config, batch_size=300):
         # Commit in batches
         if (i + 1) % batch_size == 0:
             print(f"Uploading sailors {i - batch_size + 1} to {i}...", len(sailor_teams_rows))
-            cursor.executemany("""
-                INSERT IGNORE INTO Sailors (
-                    sailorID, name, gender, sr, cr, wsr, wcr, tsr, tcr, wtsr, wtcr,
-                    sRank, cRank, wsRank, wcRank, tsRank, tcRank, wtsRank, wtcRank,
-                    avgSkipperRatio, avgCrewRatio, year
-                )
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-            """, sailor_rows)
+            with connection.cursor() as cursor:
+                cursor.executemany("""
+                    INSERT IGNORE INTO Sailors (
+                        sailorID, name, gender, sr, cr, wsr, wcr, tsr, tcr, wtsr, wtcr,
+                        sRank, cRank, wsRank, wcRank, tsRank, tcRank, wtsRank, wtcRank,
+                        avgSkipperRatio, avgCrewRatio, year
+                    )
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                """, sailor_rows)
             sailor_rows.clear()
 
             if rival_rows:
-                cursor.executemany("""
-                    INSERT IGNORE INTO SailorRivals (
-                        sailorID, rivalID, rivalName, rivalTeam, position, season, raceCount, winCount
-                    )
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-                """, rival_rows)
+                with connection.cursor() as cursor:
+                    cursor.executemany("""
+                        INSERT IGNORE INTO SailorRivals (
+                            sailorID, rivalID, rivalName, rivalTeam, position, season, raceCount, winCount
+                        )
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                    """, rival_rows)
                 rival_rows.clear()
             
             if sailor_teams_rows:
                 try:
-                    cursor.executemany("""
-                        INSERT IGNORE INTO SailorTeams(sailorID, teamID, season, position, raceCount)
-                        VALUES(%s,%s,%s,%s,%s)
-                    """, sailor_teams_rows)
+                    with connection.cursor() as cursor:
+                        cursor.executemany("""
+                            INSERT IGNORE INTO SailorTeams(sailorID, teamID, season, position, raceCount)
+                            VALUES(%s,%s,%s,%s,%s)
+                        """, sailor_teams_rows)
                     sailor_teams_rows.clear()
                 except Exception as e:
                     print(sailor_teams_rows)
@@ -418,29 +420,30 @@ def uploadSailors(people, cursor, connection, config : Config, batch_size=300):
             connection.commit()
 
     # Final flush
-    if sailor_rows:
-        cursor.executemany("""
-                INSERT IGNORE INTO Sailors (
-                    sailorID, name, gender, sr, cr, wsr, wcr, tsr, tcr, wtsr, wtcr,
-                    sRank, cRank, wsRank, wcRank, tsRank, tcRank, wtsRank, wtcRank,
-                    avgSkipperRatio, avgCrewRatio, year
-                )
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-            """, sailor_rows)
-        connection.commit()
-    if rival_rows:
-        cursor.executemany("""
-                    INSERT INTO SailorRivals (
-                        sailorID, rivalID, rivalName, rivalTeam, position, season, raceCount, winCount
+    with connection.cursor() as cursor:
+        if sailor_rows:
+            cursor.executemany("""
+                    INSERT IGNORE INTO Sailors (
+                        sailorID, name, gender, sr, cr, wsr, wcr, tsr, tcr, wtsr, wtcr,
+                        sRank, cRank, wsRank, wcRank, tsRank, tcRank, wtsRank, wtcRank,
+                        avgSkipperRatio, avgCrewRatio, year
                     )
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-                """, rival_rows)
-    if sailor_teams_rows:
-        cursor.executemany("""
-                INSERT IGNORE INTO SailorTeams(sailorID, teamID, season, position, raceCount)
-                VALUES(%s,%s,%s,%s,%s)
-            """, sailor_teams_rows)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                """, sailor_rows)
+            connection.commit()
+        if rival_rows:
+            cursor.executemany("""
+                        INSERT INTO SailorRivals (
+                            sailorID, rivalID, rivalName, rivalTeam, position, season, raceCount, winCount
+                        )
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                    """, rival_rows)
+        if sailor_teams_rows:
+            cursor.executemany("""
+                    INSERT IGNORE INTO SailorTeams(sailorID, teamID, season, position, raceCount)
+                    VALUES(%s,%s,%s,%s,%s)
+                """, sailor_teams_rows)
 
-        connection.commit()
+            connection.commit()
 
     print("✅ All sailors uploaded successfully!")
