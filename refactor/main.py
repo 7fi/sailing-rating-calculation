@@ -8,7 +8,7 @@ from calculationsTR import calculateTR
 from uploadScores import uploadScoresBySailor
 from Teams import uploadTeams
 
-from Sailors import Sailor, setupPeople, handleMerges, outputSailorsToFile, calculateSailorRanks, uploadSailors
+from Sailors import Sailor, setupPeople, handleMerges, outputSailorsToFile, calculateSailorRanks, uploadSailors, updateSailorRatios
 from config import Config
 
 import pandas as pd
@@ -161,16 +161,8 @@ def load(rootDir : str, config: Config):
     
     return df_races_full, df_sailor_info, df_sailor_ratings
 
-def updateSailorRatios(people: dict[str, Sailor]):
-    for sailor, p in people.items():
-        avgSkipperRatio = float(np.array(
-            [r['ratio'] for r in p.races if r['pos'] == 'Skipper' and 'ratio' in r.keys()]).mean())
-        avgCrewRatio = float(np.array(
-            [r['ratio'] for r in p.races if r['pos'] == 'Crew' and 'ratio' in r.keys()]).mean())
-        p.avgSkipperRatio = avgSkipperRatio
-        p.avgCrewRatio = avgCrewRatio
 
-def main(rootDir : str = ""):
+def main(rootDir : str = "", jupyter = False):
     
     config : Config = Config()
 
@@ -182,12 +174,12 @@ def main(rootDir : str = ""):
     people, df_races_full = handleMerges(df_races_full, people, config)
     people = calculateAllRaces(people, df_races_full, config)
     people = calculateSailorRanks(people, config)
+    updateSailorRatios(people)
     
     print("Calculations finished.\nOutputting to files")
     
-    updateSailorRatios(people)
-    
-    # return people, df_races_full # used for jupyter notebook
+    if jupyter:
+        return people, df_races_full
     
     outputSailorsToFile(people, config)
     

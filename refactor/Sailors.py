@@ -96,7 +96,6 @@ class Sailor:
     def __repr__(self):
         config = Config()
         return f"{self.name}: {self.teams}, {str(self.sr.ordinal(target=config.targetElo, alpha=config.alpha))} {str(self.tsr.ordinal(target=config.targetElo, alpha=config.alpha))} {self.seasons} {len(self.races)}"
-    
 
 
 def make_sailor(args):
@@ -180,7 +179,6 @@ def validPerson(p, type, config: Config):
             # and (2000 + int(p.year.split()[0]) > gradCutoff if isinstance(p.year, str) and len(p.year.split()) > 1 else int(p.year) > gradCutoff)
             # and sum([p['raceCount'][seas] for seas in targetSeasons if seas in p['raceCount'].keys()]) > 5
             )
-
 
 def outputSailorsToFile(people, config: Config ):
     allRows = []
@@ -287,6 +285,15 @@ def calculateSailorRanks(people : dict[str,Sailor], config : Config):
     
     return people
 
+def updateSailorRatios(people: dict[str, Sailor]):
+    for key, p in people.items():
+        avgSkipperRatio = float(np.array(
+            [r['ratio'] for r in p.races if r['pos'] == 'Skipper' and 'ratio' in r.keys()]).mean())
+        avgCrewRatio = float(np.array(
+            [r['ratio'] for r in p.races if r['pos'] == 'Crew' and 'ratio' in r.keys()]).mean())
+        p.avgSkipperRatio = avgSkipperRatio
+        p.avgCrewRatio = avgCrewRatio
+
 def getCounts(races):
     # season_counts = defaultdict(int)
     season_counts = {}
@@ -386,22 +393,44 @@ def uploadSailors(people, connection, config : Config, batch_size=300):
             print(f"Uploading sailors {i - batch_size + 1} to {i}...", len(sailor_teams_rows))
             with connection.cursor() as cursor:
                 cursor.executemany("""
-                    INSERT IGNORE INTO Sailors (
+                    INSERT INTO Sailors (
                         sailorID, name, gender, sr, cr, wsr, wcr, tsr, tcr, wtsr, wtcr,
                         sRank, cRank, wsRank, wcRank, tsRank, tcRank, wtsRank, wtcRank,
                         avgSkipperRatio, avgCrewRatio, year
                     )
                     VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    ON DUPLICATE KEY UPDATE
+                        sr = VALUES(sr),
+                        cr = VALUES(cr),
+                        wsr = VALUES(wsr),
+                        wcr = VALUES(wcr),
+                        tsr = VALUES(tsr),
+                        tcr = VALUES(tcr),
+                        wtsr = VALUES(wtsr),
+                        wtcr = VALUES(wtcr),
+                        sRank = VALUES(sRank),
+                        cRank = VALUES(cRank),
+                        wsRank = VALUES(wsRank),
+                        wcRank = VALUES(wcRank),
+                        tsRank = VALUES(tsRank),
+                        tcRank = VALUES(tcRank),
+                        wtsRank = VALUES(wtsRank),
+                        wtcRank = VALUES(wtcRank),
+                        avgSkipperRatio = VALUES(avgSkipperRatio),
+                        avgCrewRatio = VALUES(avgCrewRatio)
                 """, sailor_rows)
             sailor_rows.clear()
 
             if rival_rows:
                 with connection.cursor() as cursor:
                     cursor.executemany("""
-                        INSERT IGNORE INTO SailorRivals (
+                        INSERT INTO SailorRivals (
                             sailorID, rivalID, rivalName, rivalTeam, position, season, raceCount, winCount
                         )
                         VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                        ON DUPLICATE KEY UPDATE
+                            raceCount = VALUES(raceCount),
+                            winCount = VALUES(winCount)
                     """, rival_rows)
                 rival_rows.clear()
             
@@ -409,8 +438,10 @@ def uploadSailors(people, connection, config : Config, batch_size=300):
                 try:
                     with connection.cursor() as cursor:
                         cursor.executemany("""
-                            INSERT IGNORE INTO SailorTeams(sailorID, teamID, season, position, raceCount)
+                            INSERT INTO SailorTeams(sailorID, teamID, season, position, raceCount)
                             VALUES(%s,%s,%s,%s,%s)
+                            ON DUPLICATE KEY UPDATE
+                                raceCount = VALUES(raceCount)
                         """, sailor_teams_rows)
                     sailor_teams_rows.clear()
                 except Exception as e:
@@ -423,12 +454,31 @@ def uploadSailors(people, connection, config : Config, batch_size=300):
     with connection.cursor() as cursor:
         if sailor_rows:
             cursor.executemany("""
-                    INSERT IGNORE INTO Sailors (
+                    INSERT INTO Sailors (
                         sailorID, name, gender, sr, cr, wsr, wcr, tsr, tcr, wtsr, wtcr,
                         sRank, cRank, wsRank, wcRank, tsRank, tcRank, wtsRank, wtcRank,
                         avgSkipperRatio, avgCrewRatio, year
                     )
                     VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    ON DUPLICATE KEY UPDATE
+                        sr = VALUES(sr),
+                        cr = VALUES(cr),
+                        wsr = VALUES(wsr),
+                        wcr = VALUES(wcr),
+                        tsr = VALUES(tsr),
+                        tcr = VALUES(tcr),
+                        wtsr = VALUES(wtsr),
+                        wtcr = VALUES(wtcr),
+                        sRank = VALUES(sRank),
+                        cRank = VALUES(cRank),
+                        wsRank = VALUES(wsRank),
+                        wcRank = VALUES(wcRank),
+                        tsRank = VALUES(tsRank),
+                        tcRank = VALUES(tcRank),
+                        wtsRank = VALUES(wtsRank),
+                        wtcRank = VALUES(wtcRank),
+                        avgSkipperRatio = VALUES(avgSkipperRatio),
+                        avgCrewRatio = VALUES(avgCrewRatio)
                 """, sailor_rows)
             connection.commit()
         if rival_rows:
@@ -437,11 +487,16 @@ def uploadSailors(people, connection, config : Config, batch_size=300):
                             sailorID, rivalID, rivalName, rivalTeam, position, season, raceCount, winCount
                         )
                         VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                        ON DUPLICATE KEY UPDATE
+                            raceCount = VALUES(raceCount),
+                            winCount = VALUES(winCount)
                     """, rival_rows)
         if sailor_teams_rows:
             cursor.executemany("""
-                    INSERT IGNORE INTO SailorTeams(sailorID, teamID, season, position, raceCount)
+                    INSERT INTO SailorTeams(sailorID, teamID, season, position, raceCount)
                     VALUES(%s,%s,%s,%s,%s)
+                    ON DUPLICATE KEY UPDATE
+                        raceCount = VALUES(raceCount)
                 """, sailor_teams_rows)
 
             connection.commit()

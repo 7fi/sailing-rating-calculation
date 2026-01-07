@@ -66,7 +66,10 @@ def uploadScoresBySailor(people : dict[str,Sailor], connection, batch_size=3000)
             print("Inserting", start, "/", len(data))
             batch = data[start:start + batch_size]
             placeholders = ",".join(["%s"] * len(columns))
-            sql = f"INSERT IGNORE INTO {table_name} ({','.join(columns)}) VALUES ({placeholders})"
+            updates = ",".join([f"{col} = VALUES({col})" for col in columns])
+            sql = f"""INSERT INTO {table_name} ({','.join(columns)}) VALUES ({placeholders})
+                        ON DUPLICATE KEY UPDATE
+                            {updates}"""
             with connection.cursor() as cursor:
                 cursor.executemany(sql, batch)
             connection.commit()

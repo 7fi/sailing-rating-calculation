@@ -148,10 +148,6 @@ def uploadTeams(people: dict[str, Sailor], connection, config: Config):
         avg = calculateAvgRating(currentSailors, config)
         avgRatio = calculateAvgRatio(currentSailors)
         
-        # if team == 'UC Santa Cruz':
-        #     for s in currentSailors:
-        #         print(s.key, s.getOutLinks())
-        
         with connection.cursor() as cursor:
             cursor.execute("""
                 INSERT INTO Teams
