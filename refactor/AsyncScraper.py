@@ -8,6 +8,16 @@ import time
 from datetime import date, datetime
 import os
 from concurrent.futures import ProcessPoolExecutor
+import json
+
+def get_page_meta(regatta_link, page_type, scrape_state):
+    """
+    regatta_link: e.g. 'f25/oberg'
+    page_type: 'full-scores' or 'sailors'
+    """
+    return scrape_state \
+        .setdefault(regatta_link, {}) \
+        .setdefault(page_type, {})
 
 def getRaceNums(oldNums, scoresLen):
     newNums = []
@@ -47,35 +57,60 @@ def makeRaceSeries(score, team, raceNum, division, name, link, gradYear, positio
     raceSeries["TeamBoatName"] = teamBoatName
     return raceSeries
 
+async def conditional_get(client, link, page_type, scrape_state):
+    url = f"https://scores.collegesailing.org/{link}/{page_type}/"
+    html_path = f"pages/{link}-{page_type}.html"
+    meta = get_page_meta(link, page_type, scrape_state)
+
+    headers = {}
+    if "etag" in meta:
+        headers["If-None-Match"] = meta["etag"]
+    if "last_modified" in meta:
+        headers["If-Modified-Since"] = meta["last_modified"]
+
+    r = await client.get(url, headers=headers)
+
+    # Not modified -> load cached HTML
+    if r.status_code == 304:
+        with open(html_path, "r") as f:
+            return f.read(), False
+
+    r.raise_for_status()
+
+    html = r.text
+    with open(html_path, "w") as f:
+        f.write(html)
+
+    # Update global metadata
+    if "ETag" in r.headers:
+        meta["etag"] = r.headers["ETag"]
+    if "Last-Modified" in r.headers:
+        meta["last_modified"] = r.headers["Last-Modified"]
+
+    meta["last_checked"] = datetime.now(datetime.timezone.utc).isoformat()
+
+    return html, True
+
 async def cleanup_semaphore(semaphore):
     if semaphore.locked():
         # Forcefully release if it was accidentally left locked
         semaphore.release()
         print("Semaphore was released manually.")
         
-async def fetchSeasonRegattas(client, semaphore, link):
+async def fetchSeasonRegattas(client, semaphore, link, scrape_state):
     retries = 10
     backoff = 1
     for attempt in range(retries):
         try:
             async with semaphore:  # Limit concurrent requests
-                # full scores
-                url = f"https://scores.collegesailing.org/{link}/full-scores/"
-                page = await client.get(url)
-                with open(f"pages/{link}-fullscores.html", "w") as f:
-                    f.write(str(page.content))
-                seasonPage = BeautifulSoup(page.content, 'html.parser')
-                page.raise_for_status()  # Raise HTTPError for bad responses (4xx, 5xx)
-        except httpx.ConnectTimeout as e:
-            print(f"Connection timeout when fetching {url}. Retrying... ({attempt + 1}/{retries})")
-            await asyncio.sleep(backoff)  # Wait before retrying
-            backoff *= 2  # Exponential backoff
-        except httpx.ReadError as e:
-            print(f"Read error when fetching {url}. Retrying... ({attempt + 1}/{retries})")
+                html, changed = await conditional_get(client, link, "full-scores", scrape_state)
+                seasonPage = BeautifulSoup(html, 'html.parser')
+        except httpx.ConnectTimeout or httpx.ReadError as e:
+            print(f"Connection timeout or Read Error when fetching {link}. Retrying... ({attempt + 1}/{retries})")
             await asyncio.sleep(backoff)  # Wait before retrying
             backoff *= 2  # Exponential backoff
         except httpx.HTTPStatusError as e:
-            print(f"HTTP error {e.response.status_code} when fetching {url}. Skipping...")
+            print(f"HTTP error {e.response.status_code} when fetching {link}. Skipping...")
             await cleanup_semaphore(semaphore)
             return None
         except httpx.RequestError as e:
@@ -85,7 +120,7 @@ async def fetchSeasonRegattas(client, semaphore, link):
         await cleanup_semaphore(semaphore)
     return seasonPage
 
-async def fetchData(client, semaphore,regattaID, link, scoring, rescrape, date):
+async def fetchData(client, semaphore,regattaID, link, scoring, rescrape, date, scrape_state):
     retries = 10
     backoff = 1
     if not os.path.exists(f"pages/{link.split("/")[0]}"):
@@ -100,30 +135,22 @@ async def fetchData(client, semaphore,regattaID, link, scoring, rescrape, date):
             try:
                 async with semaphore:  # Limit concurrent requests
                     # full scores
-                    url = f"https://scores.collegesailing.org/{link}/full-scores/"
-                    page = await client.get(url)
-                    with open(f"pages/{link}-fullscores.html", "w") as f:
-                        f.write(str(page.content))
-                    fullScores = BeautifulSoup(page.content, 'html.parser')
-                    page.raise_for_status()  # Raise HTTPError for bad responses (4xx, 5xx)
+                    html, changed = await conditional_get(client, link, "full-scores", scrape_state)
+                    fullScores = BeautifulSoup(html, 'html.parser')
 
                     # sailors
-                    url = f"https://scores.collegesailing.org/{link}/sailors/"
-                    page = await client.get(url)
-                    with open(f"pages/{link}-sailors.html", "w") as f:
-                        f.write(str(page.content))
-                    sailors = BeautifulSoup(page.content, 'html.parser')
-                    page.raise_for_status()  # Raise HTTPError for bad responses (4xx, 5xx)
+                    html, changed = await conditional_get(client, link, "sailors", scrape_state)
+                    sailors = BeautifulSoup(html, 'html.parser')
             except httpx.ConnectTimeout as e:
-                print(f"Connection timeout when fetching {url}. Retrying... ({attempt + 1}/{retries})")
+                print(f"Connection timeout when fetching {link}. Retrying... ({attempt + 1}/{retries})")
                 await asyncio.sleep(backoff)  # Wait before retrying
                 backoff *= 2  # Exponential backoff
             except httpx.ReadError as e:
-                print(f"Read error when fetching {url}. Retrying... ({attempt + 1}/{retries})")
+                print(f"Read error when fetching {link}. Retrying... ({attempt + 1}/{retries})")
                 await asyncio.sleep(backoff)  # Wait before retrying
                 backoff *= 2  # Exponential backoff
             except httpx.HTTPStatusError as e:
-                print(f"HTTP error {e.response.status_code} when fetching {url}. Skipping...")
+                print(f"HTTP error {e.response.status_code} when fetching {link}. Skipping...")
                 await cleanup_semaphore(semaphore)
                 return None
             except httpx.RequestError as e:
@@ -148,7 +175,7 @@ def addRaces(finalRaces, teamScores, sailors, others, pos, teamHome, host, regat
             if i + 1 in sailor['races']:
                 partner = partners[sailor['races'].index(i + 1)] if sailor['races'].index(i + 1) < len(partners) else "Unknown"
                 partnerLink = partnerLinks[sailor['races'].index(i + 1)] if sailor['races'].index(i + 1) < len(partners) else "Unknown"
-                finalRaces.append(makeRaceSeries(score, teamHome, i + 1, sailor['div'], sailor['name'], sailor['link'],sailor['year'], pos, partner, partnerLink, host,regatta, raceDate, teamLink, scoring, boat_type, teamBoatName))
+                finalRaces.append(makeRaceSeries(score, teamHome, i + 1, sailor['div'], sailor['name'], sailor['link'],sailor['year'], pos, partner, partnerLink, host, regatta, raceDate, teamLink, scoring, boat_type, teamBoatName))
 
 
 def processData(soup):
@@ -341,18 +368,18 @@ async def process_in_process(executor, result):
         print("ERROR:", e)
         raise
 
-async def getBatch(client, regattaKeys, regattaValues, semaphore, executor):
+async def getBatch(client, regattaKeys, regattaValues, semaphore, executor, scrape_state):
     tasks = []
     for i, regatta in enumerate(regattaValues):
         regattaID = regattaKeys[i]
-        tasks.append(fetchData(client, semaphore, regattaID, regatta['link'], regatta['scoring'], regatta['rescrape'], regatta['date']))
+        tasks.append(fetchData(client, semaphore, regattaID, regatta['link'], regatta['scoring'], regatta['rescrape'], regatta['date'], scrape_state))
     results = await asyncio.gather(*tasks)
     
     tasks = [process_in_process(executor, regatta) for regatta in results]
     rows = await asyncio.gather(*tasks)
     return rows
 
-async def main(regattas):
+async def main(regattas, scrape_state):
     async with httpx.AsyncClient(timeout=httpx.Timeout(None,connect=15.0, read=10.0)) as client:
         allRows = []
         batchSize = 100
@@ -363,7 +390,7 @@ async def main(regattas):
             print(f"Processing batch {j // batchSize + 1}/{len(regattas.values()) // batchSize + 1}...")
             batchKeys = list(regattas.keys())[j:j + batchSize]
             batchRegattas = list(regattas.values())[j:j + batchSize]
-            results = await getBatch(client,batchKeys, batchRegattas, semaphore, executor)
+            results = await getBatch(client,batchKeys, batchRegattas, semaphore, executor, scrape_state)
             allRows.extend(results)
         return allRows
 
@@ -371,21 +398,26 @@ async def main(regattas):
 def runFleetScrape():
     print("----SCRAPING FLEET RACING----")
     start = time.time()
-    # seasons = [[f"f{i}",f"s{i}"] for i in range (16,26)]
-    # seasons = [sub for s in seasons for sub in s]
-    seasons = ['s15', 'f15']
+    # seasons = [sub for s in [[f"f{i}",f"s{i}"] for i in range(16,26)] for sub in s]
+    # seasons = ['s15', 'f15']
     
-    # seasons = ['f25']
+    seasons = ['f25']
 
     df_races = pd.DataFrame()
     try:
         print("attempting to read from file")
-        df_races = pd.read_json("racesfr.json") 
+        df_races = pd.read_json("racesfrlalal.json") 
         print("read from file")
     except:
         df_races = pd.DataFrame(columns=["Score", "Div", "Sailor", "Link", "key", "GradYear", "Position", "Partner", "Venue", "Regatta", "Scoring", "raceID", "adjusted_raceID", "Date", "raceNum", "Team", "Teamlink", "Boat", "TeamBoatName"]) 
 
     racesRegattas = df_races['Regatta'].unique()
+    
+    try:
+        with open("pages/scrape_state.json", "r") as f:
+            scrape_state = json.load(f)
+    except FileNotFoundError:
+        scrape_state = {}
     
     regattas = {}
     for season in seasons:
@@ -414,12 +446,16 @@ def runFleetScrape():
     # regattas = {'f25/oberg' : {'link':'f25/oberg','scoring':'3 Divisions', 'rescrape' : True, 'date': ''}}
 
     if len(regattas.values()) > 0:
-        totalRows = asyncio.run(main(regattas))
+        totalRows = asyncio.run(main(regattas, scrape_state))
         totalRows = [sub for row in totalRows for sub in row]
         df_races = pd.concat([df_races, pd.DataFrame(totalRows)])
         df_races = df_races.drop_duplicates(subset=['raceID', 'Sailor'], keep='last').reset_index(drop=True)
         # df_races.to_json(f"racesfr.json", index=False, date_format='iso')
-        df_races.to_json(f"racesfrtest.json", index=False, date_format='iso')
+        df_races.to_json(f"racesfrnewtest.json", index=False, date_format='iso')
+        
+        with open("pages/scrape_state.json", "w") as f:
+            json.dump(scrape_state, f, indent=2)
+
         # df_races.to_json(f"racesfr-{date.today().strftime("%Y%m%d")}.json", index=False, date_format='iso')
         # if len(totalRows) > 0:
         #     df_races_new = pd.DataFrame(totalRows)
