@@ -66,6 +66,12 @@ async def fetchData(client, semaphore, link):
             sailorData = {"name": 'Iona Deacon', 'year': '2016', 'school': '/schools/british-columbia/', 'gender': 'F', 'first_name': '', 'last_name': '', 'id': '', 'external_id': ''}
         elif link == 'andrew-smith-2028':
             sailorData = {"name": 'Andrew Smith', 'year': '2028', 'school': '/schools/michigan-state/', 'gender': 'M', 'first_name': '', 'last_name': '', 'id': '', 'external_id': ''}
+        elif link == 'patrick-freese': 
+            sailorData = {"name": 'Patrick Freese', 'year': '2016', 'school': '/schools/marquette/', 'gender': "M", 'first_name': '', 'last_name': '', 'id': '', 'external_id': ''}
+        elif link == 'giuditta-di-laghi': 
+            sailorData = {"name": 'Giuditta Di Laghi', 'year': '2016', 'school': '/schools/hampton/', 'gender': "F", 'first_name': '', 'last_name': '', 'id': '', 'external_id': ''}
+        elif link == 'erin-kemp': 
+            sailorData = {"name": 'Erin Kemp', 'year': '2016', 'school': '/schools/maryland/', 'gender': "F", 'first_name': '', 'last_name': '', 'id': '', 'external_id': ''}
         # elif link == 'catherine-lindsay':
         #     sailorData = {'gender': "F", 'name': 'Catherine "B" Lindsay', 'first_name':'Catherine "B"', 'last_name':'Lindsay', 'year': '2023', 'school': 'url:/schools/yale/', 'id': '3124222', 'external_id': None}
             
@@ -108,12 +114,12 @@ async def main(links):
             allRows.extend(results)
         return allRows
 
-def runSailorData():
-    print("Scraping sailor data")
-    df_races = pd.read_json("racesfr.json")
-    trPeople = pd.read_json("trSailorInfoAll.json")
+def runSailorData(frfile, trfile, oldDataFile):
+    print("----- Scraping sailor data ------")
+    df_races = pd.read_json(frfile)
+    trPeople = pd.read_json(trfile)
     # old = pd.DataFrame()
-    old = pd.read_json("sailor_data2.json")
+    old = pd.read_json(oldDataFile)
     
     df_races['Link'] = df_races['Link'].fillna('Unknown') # fill empty links
     links = df_races['Link'].dropna().unique()
@@ -129,6 +135,8 @@ def runSailorData():
   
     totalRows = asyncio.run(main(links))
     # print(totalRows.shape())
+    if sum([len(x) for x in totalRows]) == 0:
+        return old
     df_people = pd.DataFrame(totalRows, columns=['key', 'link', 'name', 'first_name', 'last_name', 'gender', 'year', 'teamLink','team','id', 'external_id'])
     
     # Filter people without a link in df_races
@@ -168,4 +176,4 @@ def runSailorData():
 
 
 if __name__ == "__main__":
-    runSailorData()
+    runSailorData("racesfrtest.json", "trSailorInfoAll.json", "sailor_data2.json")

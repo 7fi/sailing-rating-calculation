@@ -6,7 +6,7 @@ from datetime import date
 from datetime import date, datetime
 import os
 
-def setup():
+def setup(infile):
   # seasons = ['f24', 's24', 'f23', 's23', 'f22','s22']
   # seasons = ['f24', 's24', 'f23', 's23', 'f22','s22']
   seasons = [[f"f{i}",f"s{i}"] for i in range (16,25)]
@@ -15,7 +15,7 @@ def setup():
 
   df_old = pd.DataFrame()
   try:
-    df_old = pd.read_json("racesTR.json")
+    df_old = pd.read_json(infile)
   except:
     df_old = pd.DataFrame(columns=['raceID', 'adjusted_raceID', 'Regatta', 'raceNum', 'Date', 'Venue', 'Scoring', 'allSkipperKeys', 'allCrewKeys', 'teamAName', 'teamAUni', 'teamANick', 'teamALink', 'teamAID', 'teamABoats', 'teamAScore', 'teamAOutcome', 'teamBName', 'teamBUni', 'teamBNick', 'teamBLink', 'teamBID', 'teamBBoats', 'teamBScore', 'teamBOutcome'])
 
@@ -387,9 +387,9 @@ def getData(regattaSoups, regattas):
                       })
   return data, totalSailors
     
-def scrapeTR():    
+def scrapeTR(infile, outfile, outInfoFile):    
   print("Scraping TR")
-  regattaSoups, df_old, regattas = setup()
+  regattaSoups, df_old, regattas = setup(infile)
   data, totalSailors = getData(regattaSoups, regattas)
   
   df_cur = pd.DataFrame(data)
@@ -399,10 +399,10 @@ def scrapeTR():
 
   df_totalSailors2 = pd.DataFrame.from_dict(totalSailors,orient='index')
   df_totalSailors2 = df_totalSailors2.reset_index(drop=True)
-  df_totalSailors2.to_json("trSailorInfoAll.json", index=False)
+  df_totalSailors2.to_json(outInfoFile, index=False)
 
   df_final.to_json(f"TR-{date.today().strftime("%Y%m%d")}.json", index=False,date_format='iso')
-  df_final.to_json(f"racesTR.json", index=False,date_format='iso')
+  df_final.to_json(outfile, index=False,date_format='iso')
   
   return df_final
 

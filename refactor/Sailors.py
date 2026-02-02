@@ -77,12 +77,28 @@ class Sailor:
         return len([race for race in self.races if 'cross' in race.keys() and race['cross']])
     
     def isRankEligible(self, targetSeasons, pos, gradCutoff, needsOutlinks=True):
+        if self.year is None:
+            print(f"{self.key} has none year")
+            return False
+        
+        try:
+            if isinstance(self.year, str) and len(self.year.split()) > 1:
+                betterYear = 2000 + int(self.year.split()[0])  
+            elif isinstance(self.year, str) and self.year.isnumeric():
+                betterYear = int(self.year)
+            elif isinstance(self.year, int) and self.year > 2000:
+                betterYear = self.year
+            else: 
+                return False
+        except ValueError as e:
+            print(e)
+            print(f"error happened to {self.key}")
+            return False
+        
         return (self.hasTargetSeasons(targetSeasons, pos) # has target seasons
-                        # and has 70 outlinks   
-                        and self.getOutLinks() > 70 if needsOutlinks else True
-                        # and graduates after the cutoff
-                        and (2000 + int(self.year.split()[0]) > gradCutoff 
-                                if isinstance(self.year, str) and len(self.year.split()) > 1 else int(self.year) > gradCutoff))
+                        and self.getOutLinks() > 70 if needsOutlinks else True # and has 70 outlinks   
+                        and betterYear > gradCutoff) # and graduates after the cutoff
+        
     def resetRanks(self):
         self.skipperRank = 0
         self.crewRank = 0

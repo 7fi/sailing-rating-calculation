@@ -127,8 +127,8 @@ def upload(people : dict[str, Sailor], config: Config):
         database=os.getenv('DB_NAME')
     )
 
-    uploadSailors(people, connection, config)
-    uploadTeams(people, connection, config)
+    # uploadSailors(people, connection, config)
+    # uploadTeams(people, connection, config)
     uploadScoresBySailor(people, connection)
     
     connection.close()
@@ -137,12 +137,12 @@ def load(rootDir : str, config: Config):
     load_dotenv()
     
     if config.doScrape:
-        df_races_fr = runFleetScrape() 
-        df_races_tr = scrapeTR()
-        df_sailor_info = runSailorData()
+        df_races_fr = runFleetScrape("racesfrtest.json", "racesfrtest.json") 
+        df_races_tr = scrapeTR("racesTR.json","racesTR.json", "trSailorInfoAll.json")
+        df_sailor_info = runSailorData("racesfrtest.json", "trSailorInfoAll.json", "sailor_data2.json")
     else: 
         print("Reading from files.")
-        df_races_fr = pd.read_json(rootDir + "racesfr.json")
+        df_races_fr = pd.read_json(rootDir + "racesfrtest.json")
         df_races_tr = pd.read_json(rootDir + "racesTR.json")
         df_sailor_info = pd.read_json(rootDir + "sailor_data2.json")
         
@@ -168,10 +168,13 @@ def main(rootDir : str = "", jupyter = False):
 
     df_races_full, df_sailor_info, df_sailor_ratings = load(rootDir, config)
 
-    print("Setup complete.\nStarting calculations.")
+    print("Loading complete.\nStarting setup.")
 
     people = setupPeople(df_sailor_ratings, df_sailor_info, config)
     people, df_races_full = handleMerges(df_races_full, people, config)
+
+    print("Setup complete.\nStarting calculations.")
+    
     people = calculateAllRaces(people, df_races_full, config)
     people = calculateSailorRanks(people, config)
     updateSailorRatios(people)
