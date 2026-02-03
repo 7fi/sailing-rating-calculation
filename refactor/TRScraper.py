@@ -90,7 +90,6 @@ def setup(infile):
       
   return regattaSoups, df_old, regattas
     
-    
 def makeRaceList(raceRows):
   raceList = []
   round = ''
@@ -259,18 +258,18 @@ def getData(regattaSoups, regattas):
   totalSailors = {}
   df_totalSailors = pd.DataFrame()
 
-  for i, regatta in enumerate(list(regattaSoups.keys())):
+  for i, regattaID in enumerate(list(regattaSoups.keys())):
   # regatta = list(regattaSoups.keys())[0]
   # regatta = 's25/mass-maritime-team-race-invite'
-      print(f"({i + 1}/{len(list(regattas.values()))}) analyzing {regatta}")
+      print(f"({i + 1}/{len(list(regattas.values()))}) analyzing {regattaID}")
 
-      allRaces = regattaSoups[regatta]['allRaces']
-      sailors = regattaSoups[regatta]['sailors']
-      reportPage = regattaSoups[regatta]['report']
-      scoring = regattaSoups[regatta]['scoring']
+      allRaces = regattaSoups[regattaID]['allRaces']
+      sailors = regattaSoups[regattaID]['sailors']
+      reportPage = regattaSoups[regattaID]['report']
+      scoring = regattaSoups[regattaID]['scoring']
 
       if len(allRaces.find_all('table', class_="teamscorelist")) == 0: 
-          print(f"no scores entered for {regatta}, skipping")
+          print(f"no scores entered for {regattaID}, skipping")
           continue
 
       scoreData = allRaces.find_all('table', class_="teamscorelist")[
@@ -288,9 +287,9 @@ def getData(regattaSoups, regattas):
 
       df_races = pd.DataFrame(makeRaceList(raceRows))
 
-      df_sailors = pd.DataFrame(makeSailorList(sailors, regatta))
+      df_sailors = pd.DataFrame(makeSailorList(sailors, regattaID))
       if len(df_sailors['name'].unique()) < 2:
-          print("No rp ented for this regatta", regatta)
+          print("No rp ented for this regatta", regattaID)
           continue
 
       df_sailorLinks = pd.DataFrame(getSailorLinks(reportPage))
@@ -359,9 +358,9 @@ def getData(regattaSoups, regattas):
                   teamBBoats.append({'skipperName': skipper['name'], 'skipperLink': skipper['link'],'skipperKey': skipperKey, 
                                       'crewName': crew['name'], 'crewLink': crew['link'], 'crewKey': crewKey})
           
-          data.append({'raceID': f"{regatta}/{raceNum}",
-                       'adjusted_raceID': f"{regatta}/{raceNum}",
-                      'Regatta': regatta,
+          data.append({'raceID': f"{regattaID}/{raceNum}",
+                       'adjusted_raceID': f"{regattaID}/{raceNum}",
+                      'Regatta': regattaID,
                       'raceNum': raceNum, 'round': round,
                       'Date': date,
                       'Venue': host,

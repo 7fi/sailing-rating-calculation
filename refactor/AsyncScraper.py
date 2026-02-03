@@ -10,6 +10,8 @@ import os
 from concurrent.futures import ProcessPoolExecutor
 import json
 
+from TRScraper import makeSailorList, makeRaceList, getSailorLinks, getTeamReportInfo, getTeamIDs
+
 def getRaceNums(oldNums, scoresLen):
     newNums = []
     if oldNums == [['']]:
@@ -48,8 +50,11 @@ def makeRaceSeries(score, team, raceNum, division, name, link, gradYear, positio
     raceSeries["TeamBoatName"] = teamBoatName
     return raceSeries
 
-async def conditional_get(client, link, page_type, full_meta={}):
-    url = f"https://scores.collegesailing.org/{link}/{page_type}/"
+async def conditional_get(client, link, page_url_ending, full_meta={}, page_type=''):
+    if page_type == '':
+        page_type = page_url_ending
+        
+    url = f"https://scores.collegesailing.org/{link}/{page_url_ending}{"/" if page_url_ending != '' else ''}"
     html_path = f"pages/{link}-{page_type}.html"
     meta = full_meta[page_type]
 
@@ -93,27 +98,40 @@ async def fetchData(client, semaphore, regattaID, link, scoring, date, meta, mis
     backoff = 1
     if not os.path.exists(f"pages/{link.split("/")[0]}"):
         os.makedirs(f"pages/{link.split("/")[0]}")
-    # if os.path.exists(f"pages/{link}-fullscores.html") and os.path.exists(f"pages/{link}-sailors.html") and not rescrape:
-    #     with open(f"pages/{link}-fullscores.html", "r") as f:
-    #         fullScores = BeautifulSoup(f.read(), 'html.parser')
-    #     with open(f"pages/{link}-sailors.html", "r") as f:
-    #         sailors = BeautifulSoup(f.read(), 'html.parser')
-    # else:
     for attempt in range(retries):
         try:
             async with semaphore:  # Limit concurrent requests
-                # full scores
-                html, newMeta, changed = await conditional_get(client, link, "full-scores", meta)
-                fullScores = BeautifulSoup(html, 'html.parser')
+                if scoring == "Team":
+                    # All races
+                    html, newMeta, achanged = await conditional_get(client, link, "all", meta)
+                    fullScores = BeautifulSoup(html, 'html.parser')
 
-                # sailors
-                html, newSMeta, schanged = await conditional_get(client, link, "sailors", meta)
-                sailors = BeautifulSoup(html, 'html.parser')
-                
-                full_meta = {"full-scores": newMeta, "sailors": newSMeta}
-                
-                await cleanup_semaphore(semaphore)
-                return {'regattaID': regattaID, 'fullScores': fullScores, "sailors": sailors, 'scoring':scoring, 'date': date, 'meta': full_meta, 'process': changed or schanged or missing,}
+                    # sailors
+                    html, newSMeta, schanged = await conditional_get(client, link, "sailors", meta)
+                    sailors = BeautifulSoup(html, 'html.parser')
+                    
+                    # report
+                    html, newRMeta, rchanged = await conditional_get(client, link, "", meta, "report")
+                    report = BeautifulSoup(html, 'html.parser')
+                    
+                    full_meta = {"all": newMeta, "sailors": newSMeta, 'report': newRMeta}
+                    process = achanged or schanged or rchanged or missing
+                    
+                    await cleanup_semaphore(semaphore)
+                    return {'regattaID': regattaID, 'allRaces': fullScores, "sailors": sailors, 'report': report, 'scoring':scoring, 'date': date, 'meta': full_meta, 'process': process}
+                else:
+                    # full scores
+                    html, newMeta, changed = await conditional_get(client, link, "full-scores", meta)
+                    fullScores = BeautifulSoup(html, 'html.parser')
+
+                    # sailors
+                    html, newSMeta, schanged = await conditional_get(client, link, "sailors", meta)
+                    sailors = BeautifulSoup(html, 'html.parser')
+                    
+                    full_meta = {"full-scores": newMeta, "sailors": newSMeta}
+                    
+                    await cleanup_semaphore(semaphore)
+                    return {'regattaID': regattaID, 'fullScores': fullScores, "sailors": sailors, 'scoring':scoring, 'date': date, 'meta': full_meta, 'process': changed or schanged or missing}
         except httpx.ConnectTimeout as e:
             print(f"Connection timeout when fetching {link}. Retrying... ({attempt + 1}/{retries})")
             await asyncio.sleep(backoff)  # Wait before retrying
@@ -148,20 +166,155 @@ def addRaces(finalRaces, teamScores, sailors, others, pos, teamHome, host, regat
                 partnerLink = partnerLinks[sailor['races'].index(i + 1)] if sailor['races'].index(i + 1) < len(partners) else "Unknown"
                 finalRaces.append(makeRaceSeries(score, teamHome, i + 1, sailor['div'], sailor['name'], sailor['link'],sailor['year'], pos, partner, partnerLink, host, regatta, raceDate, teamLink, scoring, boat_type, teamBoatName))
 
-def processData(soup):
-    if soup is None:
-        print("None soup...")
+
+
+def processData(regattaData):
+    if regattaData is None:
+        print("None soup...?")
         return []
+    
+    regattaID = regattaData['regattaID']
+    scoring = regattaData['scoring']
+    raceDate = regattaData['date']
+    
+    if scoring == 'Team':
+        allRaces = regattaData['allRaces']
+        sailors = regattaData['sailors']
+        reportPage = regattaData['report']
+        return processTeamRegatta(regattaID, allRaces, sailors, reportPage, raceDate)
+    else:
+        fullScores = regattaData['fullScores']
+        sailors = regattaData['sailors']
+        return processFleetRegatta(regattaID, fullScores, sailors, scoring, raceDate)
+
+def processTeamRegatta(regattaID, allRaces, sailors, reportPage, raceDate):
+    data = []
+    totalSailors = {}
+    
+    if len(allRaces.find_all('table', class_="teamscorelist")) == 0: 
+        print(f"no scores entered for {regattaID}, skipping")
+        return
+
+    scoreData = allRaces.find_all('table', class_="teamscorelist")[
+        0].contents
+
+    host = allRaces.find("span", itemprop='location').text
+    date = allRaces.find("time").attrs['datetime']
+    date = date[:10]
+
+    regattaType = allRaces.find("span", itemprop='description').text
+    
+    host = allRaces.find("span", itemprop='location').text
+
+    raceRows = [row for table in scoreData if table for row in table.contents][1:]
+
+    df_races = pd.DataFrame(makeRaceList(raceRows))
+
+    df_sailors = pd.DataFrame(makeSailorList(sailors, regattaID))
+    if len(df_sailors['name'].unique()) < 2:
+        print("No rp ented for this regatta", regattaID)
+        return
+
+    df_sailorLinks = pd.DataFrame(getSailorLinks(reportPage))
+
+    df_teamReportInfo = pd.DataFrame(getTeamReportInfo(reportPage))
+    df_sailorteamInfo = pd.DataFrame(getTeamIDs(sailors))
+
+    # merge dfs 
+    df_sailors = pd.merge(df_sailors, df_sailorLinks, how='left', on='name')
+    # df_totalSailors = pd.concat([df_totalSailors, df_sailors])
+
+    for _, race_result in df_races.iterrows():
+        raceNum = race_result['raceNum']
+        round = race_result['round']
+        
+        teamA = race_result['teamA']
+        teamAID = df_teamReportInfo.loc[df_teamReportInfo['uniName'] == teamA['name'], 'teamID'].iat[0]
+        # print(teamAID,df_sailorteamInfo)
+        teamAName = df_sailorteamInfo.loc[df_sailorteamInfo['teamID'] == teamAID, 'teamName'].iat[0]
+        
+        teamB = race_result['teamB']
+        teamBID = df_teamReportInfo.loc[df_teamReportInfo['uniName'] == teamB['name'], 'teamID'].iat[0]
+        teamBName = df_sailorteamInfo.loc[df_sailorteamInfo['teamID'] == teamBID, 'teamName'].iat[0]
+
+        allSkipperKeys = []
+        allCrewKeys = []
+
+        teamASailors = df_sailors.loc[(df_sailors['round'] == round) & (df_sailors['teamID'] == teamAID) & (df_sailors['oppID'] == teamBID)]
+        teamABoats = []
+        if len(teamASailors) > 0:
+            skippers = teamASailors.loc[teamASailors['pos'] == 'skipper']
+            crews = teamASailors.loc[teamASailors['pos'] == 'crew']
+            for _, skipper in skippers.iterrows():
+                crew = crews.loc[crews['partner'] == skipper['name']].iloc[0]
+                
+                skipperKey = skipper['link'] if skipper['link'] != 'Unknown' else skipper['name'] + "-" + teamAName
+                allSkipperKeys.append(skipperKey)
+                
+                crewKey = crew['link'] if crew['link'] != 'Unknown' else crew['name'] + "-" + teamAName
+                allCrewKeys.append(crewKey)
+                
+                totalSailors[skipperKey] = {'name': skipper['name'], 'year': skipper['year'], 'link': skipper['link'], 'key': skipperKey, 'team': teamAName}
+                totalSailors[crewKey] = {'name': crew['name'], 'year': crew['year'], 'link': crew['link'], 'key': crewKey, 'team': teamAName}
+                
+                teamABoats.append({'skipperName': skipper['name'], 'skipperLink': skipper['link'],'skipperKey': skipperKey, 
+                                    'crewName': crew['name'], 'crewLink': crew['link'], 'crewKey': crewKey})
+        
+        teamBSailors = df_sailors.loc[(df_sailors['round'] == round) & (df_sailors['teamID'] == teamBID) & (df_sailors['oppID'] == teamAID)]
+        teamBBoats = []
+
+        if len(teamBSailors) > 0:
+            skippers = teamBSailors.loc[teamBSailors['pos'] == 'skipper']
+            crews = teamBSailors.loc[teamBSailors['pos'] == 'crew']
+            for _, skipper in skippers.iterrows():
+                crew = crews.loc[crews['partner'] == skipper['name']].iloc[0]
+                
+                skipperKey = skipper['link'] if skipper['link'] != 'Unknown' else skipper['name'] + "-" + teamBName
+                allSkipperKeys.append(skipperKey)
+                
+                crewKey = crew['link'] if crew['link'] != 'Unknown' else crew['name'] + "-" + teamBName
+                allCrewKeys.append(crewKey)
+                
+                totalSailors[skipperKey] = {'name': skipper['name'], 'year': skipper['year'], 'link': skipper['link'], 'key': skipperKey, 'team': teamBName}
+                totalSailors[crewKey] = {'name': crew['name'], 'year': crew['year'], 'link': crew['link'], 'key': crewKey, 'team': teamBName}
+                
+                teamBBoats.append({'skipperName': skipper['name'], 'skipperLink': skipper['link'],'skipperKey': skipperKey, 
+                                    'crewName': crew['name'], 'crewLink': crew['link'], 'crewKey': crewKey})
+        
+        data.append({'raceID': f"{regattaID}/{raceNum}",
+                    'adjusted_raceID': f"{regattaID}/{raceNum}",
+                    'Regatta': regattaID,
+                    'raceNum': raceNum, 'round': round,
+                    'Date': date,
+                    'Venue': host,
+                    'Scoring' : 'team',
+                    'allSkipperKeys': allSkipperKeys,
+                    'allCrewKeys': allCrewKeys,
+                    'teamAName': teamAName,
+                    'teamAUni': teamA['name'],
+                    'teamANick': teamA['nick'],
+                    'teamALink': teamA['link'],
+                    'teamAID': teamAID,
+                    'teamABoats': teamABoats,
+                    'teamAScore': teamA['score'],
+                    'teamAOutcome': teamA['outcome'],
+                    'teamBName': teamBName,
+                    'teamBUni': teamB['name'],
+                    'teamBNick': teamB['nick'],
+                    'teamBLink': teamB['link'],
+                    'teamBID': teamBID,
+                    'teamBBoats': teamBBoats,
+                    'teamBScore': teamB['score'],
+                    'teamBOutcome': teamB['outcome'],
+                    })
+    return data, totalSailors
+
+def processFleetRegatta(regattaID, fullScores, sailors, scoring, raceDate):
+    
     finalRaces = []
     
-    regatta = soup['regattaID']
-    fullScores = soup['fullScores']
-    sailors = soup['sailors']
-    scoring = soup['scoring']
-    raceDate = soup['date']
-    
     if len(fullScores.find_all('table', class_="results")) == 0: 
-        print(f"no scores entered for {regatta}, skipping")
+        print(f"no scores entered for {regattaID}, skipping")
         return
     
     page_keys = fullScores.find_all('span',class_='page-info-key')
@@ -205,7 +358,7 @@ def processData(soup):
         teamNameEls = [i for i in sailors.find_all('td', class_="teamname") if i.text == teamName and i.previous_sibling.find('a')['href'].split("/")[2] == teamLink]
         
         if len(teamNameEls) == 0:
-            print("team name entered wrong. Skipping team", teamName, regatta)
+            print("team name entered wrong. Skipping team", teamName, regattaID)
             continue
         
         teamNameEl = teamNameEls[0]
@@ -264,7 +417,7 @@ def processData(soup):
                     if skipper['name'] == crew['name'] and race in crew['races'] and skipper['div'] == crew['div']:
                         skippers.remove(skipper)
                         crews.remove(crew)
-                        print('removed duplicate skipper/crew',skipper['name'],crew['name'], regatta)
+                        print('removed duplicate skipper/crew',skipper['name'],crew['name'], regattaID)
                         break
                         
         # Skipper for both A and B maybe shouldnt be removed? it is legal to do once
@@ -282,9 +435,9 @@ def processData(soup):
             for i, score in enumerate(teamScores[skipper['div']]):
                     if i + 1 in skipper['races']:
                         for race in finalRaces:
-                            if race['raceID'] == f"{regatta}/{str(i + 1)}{skipper['div']}":
+                            if race['raceID'] == f"{regattaID}/{str(i + 1)}{skipper['div']}":
                                 if race['Sailor'] == skipper['name'] and race['Div'] == skipper['div']:
-                                    print("found illegal duplicate skipper:", skipper['name'], regatta)
+                                    print("found illegal duplicate skipper:", skipper['name'], regattaID)
                                     finalRaces = [s for s in finalRaces if not s.equals(race)]
                                     skipper['races'].remove(i+1)
 
@@ -301,15 +454,15 @@ def processData(soup):
             for i, score in enumerate(teamScores[crew['div']]):
                     if i + 1 in crew['races']:
                         for race in finalRaces:
-                            if race['raceID'] == f"{regatta}/{str(i + 1)}{crew['div']}":
+                            if race['raceID'] == f"{regattaID}/{str(i + 1)}{crew['div']}":
                                 if race['Sailor'] == crew['name'] and race['Div'] == crew['div']:
-                                    print("found illegal duplicate crew:", crew['name'], regatta)
+                                    print("found illegal duplicate crew:", crew['name'], regattaID)
                                     finalRaces = [s for s in finalRaces if not s.equals(race)]
                                     crew['races'].remove(i+1)
         
         # update skippers and crews once all rows for a team are done.
-        addRaces(finalRaces, teamScores, skippers, crews, 'Skipper', teamHome, host, regatta, teamLink, scoring, boat_type, teamName, raceDate)
-        addRaces(finalRaces, teamScores, crews, skippers, 'Crew', teamHome, host, regatta, teamLink, scoring, boat_type,teamName, raceDate)
+        addRaces(finalRaces, teamScores, skippers, crews, 'Skipper', teamHome, host, regattaID, teamLink, scoring, boat_type, teamName, raceDate)
+        addRaces(finalRaces, teamScores, crews, skippers, 'Crew', teamHome, host, regattaID, teamLink, scoring, boat_type,teamName, raceDate)
         skippers = []
         crews = []
         
@@ -390,6 +543,8 @@ def runFleetScrape(loadfile, outfile):
     except FileNotFoundError:
         scrape_state = {}
     
+    validScorings = ["3 Divisions", "2 Divisions", "Combined", "Team"]
+    
     regattas = {}
     for season in seasons:
         print("getting all regattas in", season)
@@ -407,7 +562,7 @@ def runFleetScrape(loadfile, outfile):
             recent = season in seasons[-2:]
             missing = regatta_link not in racesRegattas
             
-            if (scoring == "3 Divisions" or scoring == "2 Divisions" or scoring == "Combined") and (missing or recent):
+            if scoring in validScorings and (missing or recent):
                 meta = scrape_state.setdefault(regatta_link, {'full-scores' : {}, 'sailors' : {}})
                 regattas[regatta_link] = {"link": regatta_link, "scoring": scoring, 'missing': missing, 'date': regatta_date, 'meta': meta}
 
@@ -430,4 +585,4 @@ def runFleetScrape(loadfile, outfile):
     return df_races
 
 if __name__ == "__main__":
-    runFleetScrape("racesfrtest.json", "racesfrtest.json")
+    runFleetScrape("allracestest.json", "allracestest.json")
