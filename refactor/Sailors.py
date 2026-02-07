@@ -109,12 +109,30 @@ class Sailor:
         self.womenSkipperRankTR = 0
         self.womenCrewRankTR = 0
         
-    def resetRatingToBeforeRace(self, raceID):
-        # find the race before this race
+    def resetRatingToBeforeSeason(self, season):
+        # find the race before this race (assumes races are sorted)
+        seasonIndex = list(map(lambda r: r['raceID'].split("/")[0], self.races)).index(season)
         
-        # set 
+        ratingTypes = ['sr','cr','wsr','wcr','tsr','tcr','wtsr','wtcr']
+        for rt in ratingTypes:
+            for i in range(seasonIndex, -0, -1):
+                if self.races[i]['ratingType'] == rt:
+                    # set rating type to rating
+                    rating = self.races[i]['newRating']
+                    setattr(self, rt, rating)
         
-        return 
+        self.races = self.races[:seasonIndex]
+        
+        seasons = [sub for s in [[f"s{i}",f"f{i}"] for i in range(10,27)] for sub in s]
+        seasonsToRemove = seasons[seasons.index(season) + 1:]
+        
+        # delete all future rivals
+        for pos in ['skipper', 'crew']:
+            for sailor in self.rivals[pos].keys():
+                    for s in self.rivals[pos][sailor]['races'].keys():
+                        if s in seasonsToRemove:
+                            self.rivals[pos][sailor]['races'][s] = 0
+                            self.rivals[pos][sailor]['wins'][s] = 0
         
     def __repr__(self):
         config = Config()

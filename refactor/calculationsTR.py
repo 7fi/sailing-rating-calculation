@@ -1,6 +1,7 @@
 from config import Config
 from calculationsFR import updateSeasons
 from Sailors import Sailor
+import time
 
 def updateRatings(womens, racers, ratings, pos):
     for racer, new_rating in zip(racers, ratings):
@@ -97,7 +98,8 @@ def updateRacesForTeam(tLetter, index, racers, oppRacers, boats, starting, teamN
             'predicted': 'win' if predictions[index][0] == 1 else 'lose',
             'regAvg': regattaAvg,
             'venue': venue,
-            'type': 'team'
+            'type': 'team', 
+            'calculatedAt': time.time()
             })
 
 def calculateTR(people : dict[str, Sailor], date : str, row, pos : str, season : str, regattaAvg : float, womens : bool, config : Config):

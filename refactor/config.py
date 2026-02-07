@@ -30,4 +30,4 @@ class Config:
     
     doScrape : bool = False
     calcAll : bool = True
-    doUpload : bool = True
+    doUpload : bool = False

@@ -3,6 +3,7 @@ from regions import teamRegions
 from config import Config
 from Sailors import Sailor
 from openskill.models import PlackettLuceRating
+import time
 
 def updateRatings(racers : list[Sailor], ratings : list[PlackettLuceRating], pos, womens):
     for racer, new_rating in zip(racers, ratings):
@@ -107,7 +108,8 @@ def updateRaces(scores, racers, scoreVals, predictions, partnerKeys, partnerName
             'raceID': actualID,
             'type': 'fleet',
             'scoring': scoring,
-            'boatName': teamBoatName
+            'boatName': teamBoatName, 
+            'calculatedAt': time.time()
         })
         
 def getPartners(scores, config : Config):

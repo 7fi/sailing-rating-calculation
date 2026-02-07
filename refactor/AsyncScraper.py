@@ -48,6 +48,7 @@ def makeRaceSeries(score, team, raceNum, division, name, link, gradYear, positio
     raceSeries["Teamlink"] = teamlink
     raceSeries["Boat"] = boat
     raceSeries["TeamBoatName"] = teamBoatName
+    raceSeries["updatedAt"] = time.time()
     return raceSeries
 
 async def conditional_get(client, link, page_url_ending, full_meta={}, page_type=''):
@@ -165,7 +166,6 @@ def addRaces(finalRaces, teamScores, sailors, others, pos, teamHome, host, regat
                 partner = partners[sailor['races'].index(i + 1)] if sailor['races'].index(i + 1) < len(partners) else "Unknown"
                 partnerLink = partnerLinks[sailor['races'].index(i + 1)] if sailor['races'].index(i + 1) < len(partners) else "Unknown"
                 finalRaces.append(makeRaceSeries(score, teamHome, i + 1, sailor['div'], sailor['name'], sailor['link'],sailor['year'], pos, partner, partnerLink, host, regatta, raceDate, teamLink, scoring, boat_type, teamBoatName))
-
 
 
 def processData(regattaData):
@@ -524,7 +524,7 @@ async def main(regattas):
 def runFleetScrape(loadfile, outfile):
     print("----SCRAPING FLEET RACING----")
     start = time.time()
-    seasons = [sub for s in [[f"f{i}",f"s{i}"] for i in range(10,27)] for sub in s]
+    seasons = [sub for s in [[f"s{i}",f"f{i}"] for i in range(10,27)] for sub in s]
     # seasons = ['s14', 'f14']
     
     # seasons = ['f25']
@@ -535,7 +535,7 @@ def runFleetScrape(loadfile, outfile):
         df_races = pd.read_parquet(loadfile) 
         print("read from file")
     except:
-        df_races = pd.DataFrame(columns=["Score", "Div", "Sailor", "Link", "key", "GradYear", "Position", "Partner", "Venue", "Regatta", "Scoring", "raceID", "adjusted_raceID", "Date", "raceNum", "Team", "Teamlink", "Boat", "TeamBoatName"]) 
+        df_races = pd.DataFrame(columns=["Score", "Div", "Sailor", "Link", "key", "GradYear", "Position", "Partner", "Venue", "Regatta", "Scoring", "raceID", "adjusted_raceID", "Date", "raceNum", "Team", "Teamlink", "Boat", "TeamBoatName", "updatedAt"]) 
 
     racesRegattas = df_races['Regatta'].unique()
     

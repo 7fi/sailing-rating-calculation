@@ -88,14 +88,32 @@ def getWomensAndRegAvgTR(people, regatta_data, config : Config):
     
     return womens, regattaAvg
     
-def calculateAllRaces(people, df_races, config: Config):
+def resetPeopleToBeforeSeason(people : list[Sailor], season):
+    for person in people:
+        person.resetRatingToBeforeSeason()
+    
+def calculateAllRaces(people, df_races, calculatedAtDict:dict, config: Config):
     leng = len(df_races['adjusted_raceID'].unique())
     regatta_groups = df_races.groupby(['Regatta'], sort=False)
     i = 0
+    canSkipCalc = True
     
     for regatta_name, regatta_data in regatta_groups:
-        scoring = getScoring(regatta_data)
         season = regatta_data.iloc[0]['raceID'].split("/")[0]
+        
+        if canSkipCalc:
+            updatedAt = regatta_data.iloc[0]['updatedAt']
+            calculatedAt = calculatedAtDict.setdefault(season)
+            
+            if calculatedAt is None or updatedAt > calculatedAt:
+                canSkipCalc = False
+                # resetPeopleToBeforeSeason(season)
+                # print(people['carter-anderson'].races)
+                # raise NotImplementedError()
+            else:
+                continue
+        
+        scoring = getScoring(regatta_data)
 
         if scoring == 'team':
             womens, regattaAvg = getWomensAndRegAvgTR(people, regatta_data, config)
@@ -103,6 +121,8 @@ def calculateAllRaces(people, df_races, config: Config):
             womens, regattaAvg = getWomensAndRegAvgFR(people, regatta_data, config)
 
         race_groups = regatta_data.groupby(['Date', 'adjusted_raceID'], sort=False)
+        
+        calculatedAtDict[season] = time.time()
 
         # Iterate through each race in this regatta
         for (date, race), row in race_groups:
@@ -127,8 +147,8 @@ def upload(people : dict[str, Sailor], config: Config):
         database=os.getenv('DB_NAME')
     )
 
-    # uploadSailors(people, connection, config)
-    # uploadTeams(people, connection, config)
+    uploadSailors(people, connection, config)
+    uploadTeams(people, connection, config)
     uploadScoresBySailor(people, connection)
     
     connection.close()
@@ -151,22 +171,27 @@ def load(rootDir : str, config: Config):
     # clean up memory
     del df_races_fr, df_races_tr
     
-    df_races_full = df_races_full.sort_values(['Date', 'raceNum', 'Div']).reset_index(drop=True)    
+    df_races_full = df_races_full.sort_values(['Date', 'raceNum', 'Div']).reset_index(drop=True)
     
     df_sailor_ratings = None
     if not config.calcAll:
-        cutoff = (datetime.now() - timedelta(weeks=2))
-        df_races_full = df_races_full.loc[df_races_full['Date'] > cutoff]
-        df_sailor_ratings = pd.read_parquet(rootDir + "sailors-latest.parquet")
+        # cutoff = (datetime.now() - timedelta(weeks=2))
+        # df_races_full = df_races_full.loc[df_races_full['Date'] > cutoff]
+        df_sailor_ratings = pd.read_json(rootDir + "sailors-latest.json")
+
+    try:
+        calculatedAtDict = pd.read_json(rootDir + "calculated_at_dict.json")
+    except FileNotFoundError:
+        calculatedAtDict = {}
     
-    return df_races_full, df_sailor_info, df_sailor_ratings
+    return df_races_full, df_sailor_info, df_sailor_ratings, calculatedAtDict
 
 
 def main(rootDir : str = "", jupyter = False):
     
     config : Config = Config()
 
-    df_races_full, df_sailor_info, df_sailor_ratings = load(rootDir, config)
+    df_races_full, df_sailor_info, df_sailor_ratings, calculatedAtDict = load(rootDir, config)
 
     print("Loading complete.\nStarting setup.")
 
@@ -175,11 +200,15 @@ def main(rootDir : str = "", jupyter = False):
 
     print("Setup complete.\nStarting calculations.")
     
-    people = calculateAllRaces(people, df_races_full, config)
+    people = calculateAllRaces(people, df_races_full, calculatedAtDict, config)
     people = calculateSailorRanks(people, config)
     updateSailorRatios(people)
     
     print("Calculations finished.\nOutputting to files")
+    
+    print(calculatedAtDict)
+    calculated_df = pd.DataFrame(calculatedAtDict)
+    calculated_df.to_json(rootDir + "calculated_at_dict.json", index=False)
     
     if jupyter:
         return people, df_races_full
