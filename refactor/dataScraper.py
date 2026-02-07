@@ -114,7 +114,7 @@ async def main(links):
             allRows.extend(results)
         return allRows
 
-def runSailorData(frfile, trfile, oldDataFile):
+def runSailorData(frfile, trfile, oldDataFile, outfile):
     print("----- Scraping sailor data ------")
     df_races = pd.read_json(frfile)
     trPeople = pd.read_json(trfile)
@@ -136,7 +136,9 @@ def runSailorData(frfile, trfile, oldDataFile):
     totalRows = asyncio.run(main(links))
     # print(totalRows.shape())
     if sum([len(x) for x in totalRows]) == 0:
+        old.to_parquet(outfile, index=False)
         return old
+    ['str', 'str', 'str', 'str', 'str', 'int', 'str', 'str', 'int', 'int']
     df_people = pd.DataFrame(totalRows, columns=['key', 'link', 'name', 'first_name', 'last_name', 'gender', 'year', 'teamLink','team','id', 'external_id'])
     
     # Filter people without a link in df_races
@@ -171,9 +173,9 @@ def runSailorData(frfile, trfile, oldDataFile):
     else: 
         df_people_final = pd.concat([df_people, df_no_link], ignore_index=True)
     
-    df_people_final.to_json("sailor_data2.json", index=False)
+    print("outputting to parquet")
+    df_people_final.to_parquet(outfile, index=False)
     return df_people_final
 
-
 if __name__ == "__main__":
-    runSailorData("racesfrtest.json", "trSailorInfoAll.json", "sailor_data2.json")
+    runSailorData("racesfrtest.json", "trSailorInfoAll.json", "sailor_data2.json", "sailor_data2.parquet")

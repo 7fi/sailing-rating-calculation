@@ -178,6 +178,7 @@ def processData(regattaData):
     raceDate = regattaData['date']
     
     if scoring == 'Team':
+        return []
         allRaces = regattaData['allRaces']
         sailors = regattaData['sailors']
         reportPage = regattaData['report']

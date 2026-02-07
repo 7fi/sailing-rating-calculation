@@ -109,6 +109,13 @@ class Sailor:
         self.womenSkipperRankTR = 0
         self.womenCrewRankTR = 0
         
+    def resetRatingToBeforeRace(self, raceID):
+        # find the race before this race
+        
+        # set 
+        
+        return 
+        
     def __repr__(self):
         config = Config()
         return f"{self.name}: {self.teams}, {str(self.sr.ordinal(target=config.targetElo, alpha=config.alpha))} {str(self.tsr.ordinal(target=config.targetElo, alpha=config.alpha))} {self.seasons} {len(self.races)}"
@@ -257,8 +264,8 @@ def outputSailorsToFile(people, config: Config ):
                                                 'outLinks', 'GradYear', 'Links',
                                                 'Seasons', 'Cross', 'Races',  'Rivals', 'skipperAvgRatio', 'crewAvgRatio'])
 
-    df_sailors.to_json(f'sailors-{date.today().strftime("%Y%m%d")}.json', index=False)
-    df_sailors.to_json(f'sailors-latest.json', index=False)
+    df_sailors.to_parquet(f'sailors-{date.today().strftime("%Y%m%d")}.parquet', index=False)
+    df_sailors.to_parquet(f'sailors-latest.parquet', index=False)
     df_sailors = df_sailors.sort_values(
         by='numRaces', ascending=False).reset_index(drop=True)
     

@@ -127,8 +127,8 @@ def upload(people : dict[str, Sailor], config: Config):
         database=os.getenv('DB_NAME')
     )
 
-    # uploadSailors(people, connection, config)
-    # uploadTeams(people, connection, config)
+    uploadSailors(people, connection, config)
+    uploadTeams(people, connection, config)
     uploadScoresBySailor(people, connection)
     
     connection.close()
@@ -142,9 +142,9 @@ def load(rootDir : str, config: Config):
         df_sailor_info = runSailorData("racesfrtest.json", "trSailorInfoAll.json", "sailor_data2.json")
     else: 
         print("Reading from files.")
-        df_races_fr = pd.read_json(rootDir + "racesfrtest.json")
-        df_races_tr = pd.read_json(rootDir + "racesTR.json")
-        df_sailor_info = pd.read_json(rootDir + "sailor_data2.json")
+        df_races_fr = pd.read_parquet(rootDir + "racesfrtest.parquet")
+        df_races_tr = pd.read_parquet(rootDir + "racesTR.parquet")
+        df_sailor_info = pd.read_parquet(rootDir + "sailor_data2.parquet")
         
     df_races_full = pd.concat([df_races_fr, df_races_tr])
     
@@ -157,7 +157,7 @@ def load(rootDir : str, config: Config):
     if not config.calcAll:
         cutoff = (datetime.now() - timedelta(weeks=2))
         df_races_full = df_races_full.loc[df_races_full['Date'] > cutoff]
-        df_sailor_ratings = pd.read_json(rootDir + "sailors-latest.json")
+        df_sailor_ratings = pd.read_parquet(rootDir + "sailors-latest.parquet")
     
     return df_races_full, df_sailor_info, df_sailor_ratings
 

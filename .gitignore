@@ -3,7 +3,8 @@
 /sailorPages
 /pages
 /pagesTR
-.DS_Store
 *.pyc
 *.pyc
 .env
+*.DS_Store
+*.parquet

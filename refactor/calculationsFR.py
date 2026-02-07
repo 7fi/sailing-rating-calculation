@@ -89,7 +89,7 @@ def updateRaces(scores, racers, scoreVals, predictions, partnerKeys, partnerName
         
         # add race to each sailor's score
         sailor.races.append({
-            # Need to rewrite to include DNF and such (correctly evaluating score but its hard to tell )
+            # Need to rewrite to include DNF and such (correctly evaluating score but its hard to tell)
             'score': int(score),
             'pos': pos,
             'predicted': pred[0],
