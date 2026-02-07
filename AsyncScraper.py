@@ -56,7 +56,7 @@ async def fetchSeasonRegattas(client, semaphore, link):
                 # full scores
                 url = f"https://scores.collegesailing.org/{link}/full-scores/"
                 page = await client.get(url)
-                with open(f"pages/{link}-fullscores.html", "w") as f:
+                with open(f"pages/{link}-full-scores.html", "w") as f:
                     f.write(str(page.content))
                 seasonPage = BeautifulSoup(page.content, 'html.parser')
                 page.raise_for_status()  # Raise HTTPError for bad responses (4xx, 5xx)
@@ -84,8 +84,8 @@ async def fetchData(client, semaphore,regattaID, link, scoring, rescrape, date):
     backoff = 1
     if not os.path.exists(f"pages/{link.split("/")[0]}"):
         os.makedirs(f"pages/{link.split("/")[0]}")
-    if os.path.exists(f"pages/{link}-fullscores.html") and os.path.exists(f"pages/{link}-sailors.html") and not rescrape:
-        with open(f"pages/{link}-fullscores.html", "r") as f:
+    if os.path.exists(f"pages/{link}-full-scores.html") and os.path.exists(f"pages/{link}-sailors.html") and not rescrape:
+        with open(f"pages/{link}-full-scores.html", "r") as f:
             fullScores = BeautifulSoup(f.read(), 'html.parser')
         with open(f"pages/{link}-sailors.html", "r") as f:
             sailors = BeautifulSoup(f.read(), 'html.parser')
@@ -96,7 +96,7 @@ async def fetchData(client, semaphore,regattaID, link, scoring, rescrape, date):
                     # full scores
                     url = f"https://scores.collegesailing.org/{link}/full-scores/"
                     page = await client.get(url)
-                    with open(f"pages/{link}-fullscores.html", "w") as f:
+                    with open(f"pages/{link}-full-scores.html", "w") as f:
                         f.write(str(page.content))
                     fullScores = BeautifulSoup(page.content, 'html.parser')
                     page.raise_for_status()  # Raise HTTPError for bad responses (4xx, 5xx)
@@ -383,10 +383,10 @@ async def main(regattas):
 def runFleetScrape():
     print("----SCRAPING FLEET RACING----")
     start = time.time()
-    seasons = [[f"f{i}",f"s{i}"] for i in range (16,26)]
+    seasons = [[f"f{i}",f"s{i}"] for i in range (16,27)]
     seasons = [sub for s in seasons for sub in s]
     
-    seasons = ['f25']
+    # seasons = ['f25']
 
     df_races = pd.DataFrame()
     try:
@@ -405,7 +405,13 @@ def runFleetScrape():
         page = requests.get(url)
         listSoup = BeautifulSoup(page.content, 'html.parser')
         
-        tbody = listSoup.find('table', class_="season-summary").find('tbody')
+        if listSoup is None:
+            continue
+        try:
+            tbody = listSoup.find('table', class_="season-summary").find('tbody')
+        except Exception as e:
+            print(e)
+            continue
         
         for link in tbody.find_all("a", href=True):
             regatta = season + "/" + link['href']

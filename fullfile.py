@@ -940,8 +940,8 @@ def uploadSailors(people):
     eligible = [p for p in people.values() if (targetSeasons[-1] in p.seasons['skipper']
                                                or targetSeasons[-1] in p.seasons['crew'])
                 and len(p.races) > 0
-                and type(p.races[-1]['date']) != type("hi")
-                and (today - p.races[-1]['date']).days < 14]
+                and type(p.races[-1]['date']) != type("hi")]
+                # and (today - p.races[-1]['date']).days < 14]
 
     # eligible = [p for p in people.values() if 'team' in [r['type'] for r in p.races]]
 
@@ -1419,9 +1419,9 @@ def uploadAllSailors(people):
 if __name__ == "__main__":
     start = time.time()
 
-    doScrape = True
-    doCalc = False
-    doUpload = False
+    doScrape = False
+    doCalc = True
+    doUpload = True
 
     if doScrape:
         df_races = runFleetScrape()
