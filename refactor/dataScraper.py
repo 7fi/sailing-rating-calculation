@@ -116,10 +116,10 @@ async def main(links):
 
 def runSailorData(frfile, trfile, oldDataFile, outfile):
     print("----- Scraping sailor data ------")
-    df_races = pd.read_json(frfile)
+    df_races = pd.read_parquet(frfile)
     trPeople = pd.read_json(trfile)
     # old = pd.DataFrame()
-    old = pd.read_json(oldDataFile)
+    old = pd.read_parquet(oldDataFile)
     
     df_races['Link'] = df_races['Link'].fillna('Unknown') # fill empty links
     links = df_races['Link'].dropna().unique()
@@ -173,9 +173,12 @@ def runSailorData(frfile, trfile, oldDataFile, outfile):
     else: 
         df_people_final = pd.concat([df_people, df_no_link], ignore_index=True)
     
+    df_people_final['id'] = pd.to_numeric(df_people_final['id'], errors='raise')
+    
     print("outputting to parquet")
     df_people_final.to_parquet(outfile, index=False)
     return df_people_final
 
 if __name__ == "__main__":
-    runSailorData("racesfrtest.json", "trSailorInfoAll.json", "sailor_data2.json", "sailor_data2.parquet")
+    runSailorData("racesfrtest.parquet", "trSailorInfoAll.json", "sailor_data2.parquet", "sailor_data2.parquet")
+    # runSailorData("racesfrtest.json", "trSailorInfoAll.json", "sailor_data2.json", "sailor_data2.parquet")

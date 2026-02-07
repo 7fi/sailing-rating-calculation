@@ -127,8 +127,8 @@ def upload(people : dict[str, Sailor], config: Config):
         database=os.getenv('DB_NAME')
     )
 
-    uploadSailors(people, connection, config)
-    uploadTeams(people, connection, config)
+    # uploadSailors(people, connection, config)
+    # uploadTeams(people, connection, config)
     uploadScoresBySailor(people, connection)
     
     connection.close()
@@ -137,9 +137,9 @@ def load(rootDir : str, config: Config):
     load_dotenv()
     
     if config.doScrape:
-        df_races_fr = runFleetScrape("racesfrtest.json", "racesfrtest.json") 
+        df_races_fr = runFleetScrape("racesfrtest.parquet", "racesfrtest.parquet") 
         df_races_tr = scrapeTR("racesTR.json","racesTR.json", "trSailorInfoAll.json")
-        df_sailor_info = runSailorData("racesfrtest.json", "trSailorInfoAll.json", "sailor_data2.json")
+        df_sailor_info = runSailorData("racesfrtest.parquet", "trSailorInfoAll.json", "sailor_data2.parquet", "sailor_data2.parquet")
     else: 
         print("Reading from files.")
         df_races_fr = pd.read_parquet(rootDir + "racesfrtest.parquet")

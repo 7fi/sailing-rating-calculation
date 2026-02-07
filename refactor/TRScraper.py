@@ -9,8 +9,8 @@ import os
 def setup(infile):
   # seasons = ['f24', 's24', 'f23', 's23', 'f22','s22']
   # seasons = ['f24', 's24', 'f23', 's23', 'f22','s22']
-  seasons = [[f"f{i}",f"s{i}"] for i in range (16,25)]
-  seasons = [sub for s in seasons for sub in s] + ['s25']
+  seasons = [[f"f{i}",f"s{i}"] for i in range (16,27)]
+  seasons = [sub for s in seasons for sub in s]
   # seasons = ['s24']
 
   df_old = pd.DataFrame()
@@ -26,7 +26,11 @@ def setup(infile):
     page = requests.get(url)
     listSoup = BeautifulSoup(page.content, 'html.parser')
     
-    tbody = listSoup.find('table', class_="season-summary").find('tbody')
+    try:
+        tbody = listSoup.find('table', class_="season-summary").find('tbody')
+    except Exception as e:
+        print(e)
+        continue
     
     for link in tbody.find_all("a", href=True):
       scoring = link.parent.next_sibling.next_sibling.next_sibling.text

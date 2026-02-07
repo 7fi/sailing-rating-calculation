@@ -264,8 +264,8 @@ def outputSailorsToFile(people, config: Config ):
                                                 'outLinks', 'GradYear', 'Links',
                                                 'Seasons', 'Cross', 'Races',  'Rivals', 'skipperAvgRatio', 'crewAvgRatio'])
 
-    df_sailors.to_parquet(f'sailors-{date.today().strftime("%Y%m%d")}.parquet', index=False)
-    df_sailors.to_parquet(f'sailors-latest.parquet', index=False)
+    df_sailors.to_json(f'sailors-{date.today().strftime("%Y%m%d")}.json', index=False)
+    df_sailors.to_json(f'sailors-latest.json', index=False)
     df_sailors = df_sailors.sort_values(
         by='numRaces', ascending=False).reset_index(drop=True)
     

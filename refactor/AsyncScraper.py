@@ -517,13 +517,14 @@ async def main(regattas):
             batchRegattas = list(regattas.values())[j:j + batchSize]
             results = await getBatch(client,batchKeys, batchRegattas, semaphore, executor)
             allRows.extend(results)
+            
         return allRows
 
 
 def runFleetScrape(loadfile, outfile):
     print("----SCRAPING FLEET RACING----")
     start = time.time()
-    seasons = [sub for s in [[f"f{i}",f"s{i}"] for i in range(10,26)] for sub in s]
+    seasons = [sub for s in [[f"f{i}",f"s{i}"] for i in range(10,27)] for sub in s]
     # seasons = ['s14', 'f14']
     
     # seasons = ['f25']
@@ -531,7 +532,7 @@ def runFleetScrape(loadfile, outfile):
     df_races = pd.DataFrame()
     try:
         print("attempting to read from file")
-        df_races = pd.read_json(loadfile) 
+        df_races = pd.read_parquet(loadfile) 
         print("read from file")
     except:
         df_races = pd.DataFrame(columns=["Score", "Div", "Sailor", "Link", "key", "GradYear", "Position", "Partner", "Venue", "Regatta", "Scoring", "raceID", "adjusted_raceID", "Date", "raceNum", "Team", "Teamlink", "Boat", "TeamBoatName"]) 
@@ -544,7 +545,8 @@ def runFleetScrape(loadfile, outfile):
     except FileNotFoundError:
         scrape_state = {}
     
-    validScorings = ["3 Divisions", "2 Divisions", "Combined", "Team"]
+    # validScorings = ["3 Divisions", "2 Divisions", "Combined", "Team"]
+    validScorings = ["3 Divisions", "2 Divisions", "Combined"]
     
     regattas = {}
     for season in seasons:
@@ -553,7 +555,11 @@ def runFleetScrape(loadfile, outfile):
         page = requests.get(url)
         listSoup = BeautifulSoup(page.content, 'html.parser')
         
-        tbody = listSoup.find('table', class_="season-summary").find('tbody')
+        try:
+            tbody = listSoup.find('table', class_="season-summary").find('tbody')
+        except Exception as e:
+            print(e)
+            continue
         
         for link in tbody.find_all("a", href=True):
             scoring = link.parent.next_sibling.next_sibling.next_sibling.text
@@ -569,15 +575,19 @@ def runFleetScrape(loadfile, outfile):
 
     # regattas = {'f25/oberg' : {'link':'f25/oberg','scoring':'3 Divisions', 'rescrape' : True, 'date': ''}}
 
-    if len(regattas.values()) > 0:
+    if len(regattas.values()) > 0:        
         totalRows = asyncio.run(main(regattas))
         totalRows = [sub for row in totalRows for sub in row]
-        df_races = pd.concat([df_races, pd.DataFrame(totalRows)])
-        df_races = df_races.drop_duplicates(subset=['raceID', 'Sailor'], keep='last').reset_index(drop=True)
-        df_races.to_json(outfile, index=False, date_format='iso')
         
         with open("pages/scrape_state.json", "w") as f:
             json.dump(scrape_state, f, indent=2)
+            
+        df_races = pd.concat([df_races, pd.DataFrame(totalRows)])
+        df_races = df_races.drop_duplicates(subset=['raceID', 'Sailor'], keep='last').reset_index(drop=True)
+        df_races["Date"] = pd.to_datetime(df_races["Date"], errors="raise")
+        df_races["raceNum"] = pd.to_numeric(df_races["raceNum"], errors="raise")
+        df_races.to_parquet(outfile, index=False)
+        
     else:
         print("no new races to be scraped.")
 
@@ -586,4 +596,4 @@ def runFleetScrape(loadfile, outfile):
     return df_races
 
 if __name__ == "__main__":
-    runFleetScrape("allracestest.json", "allracestest.json")
+    runFleetScrape("racesfrtest.parquet", "racesfrtest.parquet")

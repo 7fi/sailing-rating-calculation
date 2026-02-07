@@ -22,6 +22,12 @@ class Config:
     }
     numTops : ClassVar[dict[str, int]] = {'open': 3, 'womens': 2}
     
+    frfile = 'racesfrtest.parquet'
+    trfile = 'racesTR.parquet'
+    trSailorInfoFile = 'trSailorinfoAll.json'
+    
+    sailorInfoFile = 'sailor_data2.parquet'
+    
     doScrape : bool = False
     calcAll : bool = True
     doUpload : bool = True

@@ -1,5 +1,5 @@
 from Sailors import Sailor
-def uploadScoresBySailor(people : dict[str,Sailor], connection, batch_size=3000):
+def uploadScoresBySailor(people : dict[str,Sailor], connection, batch_size=10000):
     fleet_rows = []
     team_rows = []
 
@@ -86,8 +86,8 @@ def uploadScoresBySailor(people : dict[str,Sailor], connection, batch_size=3000)
         'date', 'venue', 'boat', 'boatName', 'ratingType', 'oldRating', 'newRating', 'regAvg'
     ]
     
-    # print("Inserting FleetScores...")
-    # batch_insert("FleetScores", fleet_columns, fleet_rows)
+    print("Inserting FleetScores...")
+    batch_insert("FleetScores", fleet_columns, fleet_rows)
     
     print("Inserting TRScores...")
     batch_insert("TRScores", team_columns, team_rows)
