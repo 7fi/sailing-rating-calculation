@@ -18,6 +18,10 @@ from datetime import datetime, timedelta
 import mysql.connector
 from dotenv import load_dotenv
 import os
+import json
+
+import cProfile
+import pstats
 
 def getScoring(regatta_data):
     scoring = ""
@@ -97,9 +101,20 @@ def calculateAllRaces(people, df_races, calculatedAtDict:dict, config: Config):
     regatta_groups = df_races.groupby(['Regatta'], sort=False)
     i = 0
     canSkipCalc = True
+    dontNeedToCalc = ['sr','cr','wsr','wcr','tsr','tcr','wtsr','wtcr']
     
     for regatta_name, regatta_data in regatta_groups:
         season = regatta_data.iloc[0]['raceID'].split("/")[0]
+        
+        
+        scoring = getScoring(regatta_data)
+
+        if scoring == 'team':
+            womens, regattaAvg = getWomensAndRegAvgTR(people, regatta_data, config)
+        else:
+            womens, regattaAvg = getWomensAndRegAvgFR(people, regatta_data, config)
+            
+        ratingType = ('w' if womens else '') + ('t' if pos.lower() == 'skipper' else 'f') + 'r'
         
         if canSkipCalc:
             updatedAt = regatta_data.iloc[0]['updatedAt']
@@ -113,12 +128,7 @@ def calculateAllRaces(people, df_races, calculatedAtDict:dict, config: Config):
             else:
                 continue
         
-        scoring = getScoring(regatta_data)
-
-        if scoring == 'team':
-            womens, regattaAvg = getWomensAndRegAvgTR(people, regatta_data, config)
-        else:
-            womens, regattaAvg = getWomensAndRegAvgFR(people, regatta_data, config)
+        
 
         race_groups = regatta_data.groupby(['Date', 'adjusted_raceID'], sort=False)
         
@@ -180,9 +190,11 @@ def load(rootDir : str, config: Config):
         df_sailor_ratings = pd.read_json(rootDir + "sailors-latest.json")
 
     try:
-        calculatedAtDict = pd.read_json(rootDir + "calculated_at_dict.json")
+        with open("calculated_at_dict.json", "r") as f:
+            calculatedAtDict = json.load(f)
     except FileNotFoundError:
         calculatedAtDict = {}
+    print(calculatedAtDict)
     
     return df_races_full, df_sailor_info, df_sailor_ratings, calculatedAtDict
 
@@ -207,8 +219,8 @@ def main(rootDir : str = "", jupyter = False):
     print("Calculations finished.\nOutputting to files")
     
     print(calculatedAtDict)
-    calculated_df = pd.DataFrame(calculatedAtDict)
-    calculated_df.to_json(rootDir + "calculated_at_dict.json", index=False)
+    with open("calculated_at_dict.json", "w") as f:
+        json.dump(calculatedAtDict, f)
     
     if jupyter:
         return people, df_races_full
@@ -216,12 +228,19 @@ def main(rootDir : str = "", jupyter = False):
     outputSailorsToFile(people, config)
     
     print("File output finished.")
+    
     if config.doUpload:
         print("Uploading to db")
         upload(people, config)
 
 if __name__ == "__main__":
+    # with cProfile.Profile() as profile:
     start = time.time()
     main()
     end = time.time()
     print(f"{int((end-start) // 60)}:{int((end-start) % 60)}")
+    
+    # results = pstats.Stats(profile)
+    # results.sort_stats(pstats.SortKey.TIME)
+    # results.print_stats()
+    # results.dump_stats('profiling.prof')

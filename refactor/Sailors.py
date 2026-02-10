@@ -7,6 +7,7 @@ from concurrent.futures import ThreadPoolExecutor
 import pandas as pd
 import numpy as np
 from datetime import date
+from functools import partial
 
 @dataclass
 class Sailor:
@@ -139,23 +140,30 @@ class Sailor:
         return f"{self.name}: {self.teams}, {str(self.sr.ordinal(target=config.targetElo, alpha=config.alpha))} {str(self.tsr.ordinal(target=config.targetElo, alpha=config.alpha))} {self.seasons} {len(self.races)}"
 
 
-def make_sailor(args):
+def make_sailor(config, args):
     key, link, name, first_name, last_name, gender, year, teamLink, team, id, external_id = args
-    model = PlackettLuce(beta=25.0 / 120.0)
-    rating = model.rating
+
+    ratings = [PlackettLuceRating(config.model.mu, config.model.sigma) for _ in range(8)]
+
     return key, Sailor(
         name, key, gender, year,
         [link], [team],
         seasons={'skipper': [], 'crew': []},
         races=[], rivals={},
-        sr=rating(), cr=rating(), wsr=rating(), wcr=rating(),
-        tsr=rating(), tcr=rating(), wtsr=rating(), wtcr=rating()
+        sr=ratings[0], cr=ratings[1],
+        wsr=ratings[2], wcr=ratings[3],
+        tsr=ratings[4], tcr=ratings[5],
+        wtsr=ratings[6], wtcr=ratings[7],
     )
 
-def setupPeople(df_sailor_ratings, df_sailor_info, config: Config):
 
-    # read from file first
-    if not config.calcAll:
+def setupPeople(df_sailor_ratings, df_sailor_info, config: Config):
+    if config.calcAll:
+        rows = list(df_sailor_info.itertuples(index=False, name=None))
+        results = map(partial(make_sailor, config), rows)
+        return dict(results)
+    
+    else:
         raise NotImplementedError
         people = {row.key: Sailor(row.Sailor, row.key, row.GradYear, row.Links, row.Teams, row.Seasons, row.Races, row.Rivals,
                                   config.model.create_rating(
@@ -189,11 +197,7 @@ def setupPeople(df_sailor_ratings, df_sailor_info, config: Config):
                                      config.model.rating(),
                                      config.model.rating(),
                                      gender=row.gender)
-    else: # Set up people dictionary
-        rows = list(df_sailor_info.itertuples(index=False, name=None))
-        with ThreadPoolExecutor() as executor:
-            results = list(executor.map(make_sailor, rows))
-        return dict(results)
+        
 
 def handleMerges(df_races, people, config : Config):
     # merge sailor objects
@@ -282,7 +286,7 @@ def outputSailorsToFile(people, config: Config ):
                                                 'outLinks', 'GradYear', 'Links',
                                                 'Seasons', 'Cross', 'Races',  'Rivals', 'skipperAvgRatio', 'crewAvgRatio'])
 
-    df_sailors.to_json(f'sailors-{date.today().strftime("%Y%m%d")}.json', index=False)
+    # df_sailors.to_json(f'sailors-{date.today().strftime("%Y%m%d")}.json', index=False)
     df_sailors.to_json(f'sailors-latest.json', index=False)
     df_sailors = df_sailors.sort_values(
         by='numRaces', ascending=False).reset_index(drop=True)

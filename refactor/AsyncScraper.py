@@ -569,6 +569,7 @@ def runFleetScrape(loadfile, outfile):
             recent = season in seasons[-2:]
             missing = regatta_link not in racesRegattas
             
+            # if regatta_link == 'f25/34th-captain-hurst-bowl':
             if scoring in validScorings and (missing or recent):
                 meta = scrape_state.setdefault(regatta_link, {'full-scores' : {}, 'sailors' : {}})
                 regattas[regatta_link] = {"link": regatta_link, "scoring": scoring, 'missing': missing, 'date': regatta_date, 'meta': meta}
@@ -596,4 +597,4 @@ def runFleetScrape(loadfile, outfile):
     return df_races
 
 if __name__ == "__main__":
-    runFleetScrape("racesfrtest.parquet", "racesfrtest.parquet")
+    runFleetScrape("racesfrtest2.parquet", "racesfrtest.parquet")
