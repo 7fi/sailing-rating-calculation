@@ -16,9 +16,9 @@ df_races =  pl.read_parquet("racesfrtest.parquet")
 df_races = df_races.rename({"key": "sailorID"})
 df_races = df_races.filter(pl.col("Score").is_not_null())
 
-race_counts = df_races.group_by("raceID").agg(pl.count().alias("count"))
-valid_race_ids = race_counts.filter(pl.col("count") > 6).select("raceID")
-df_races = df_races.join(valid_race_ids, on="raceID", how="inner")
+# race_counts = df_races.group_by("raceID").agg(pl.count().alias("count"))
+# valid_race_ids = race_counts.filter(pl.col("count") > 6).select("raceID")
+# df_races = df_races.join(valid_race_ids, on="raceID", how="inner")
 
 with connection.cursor() as cursor:
     cursor.execute("SELECT season, regatta, raceNumber, division, sailorID FROM FleetScores")

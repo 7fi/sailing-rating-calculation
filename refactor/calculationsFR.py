@@ -63,7 +63,7 @@ def updateCrossLinks(sailor, isCross, regions, race, config : Config):
     
     return outLinks
 
-def updateRaces(scores, racers, scoreVals, predictions, partnerKeys, partnerNames, startingRating, ratings, teams, teamBoatNames, race, scoring, season, date, womens, regattaAvg, pos, config : Config):
+def updateRaces(newRaces, scores, racers : list[Sailor], scoreVals, predictions, partnerKeys, partnerNames, startingRating, ratings, teams, teamBoatNames, race, scoring, season, date, womens, regattaAvg, pos, config : Config):
     if pos.lower() not in ['skipper', 'crew']:
         print("Pos is weird value in updateRaces ", pos)
     venue = scores['Venue'].iat[0]
@@ -112,6 +112,35 @@ def updateRaces(scores, racers, scoreVals, predictions, partnerKeys, partnerName
             'calculatedAt': time.time()
         })
         
+        newRaces.append({
+            'raceID': actualID,
+            'season': actualID.split("/")[0],
+            'regatta': actualID.split("/")[1],
+            'raceNumber': actualID.split("/")[2][:-1],
+            'div': actualID.split("/")[2][-1],
+            'sailorID': sailor.key,
+            'partnerID': partnerKey,
+            'partnerName': partnerName,
+            'score': int(score),
+            'predicted': pred[0],
+            'ratio': 1 - ((int(score) - 1) / (len(racers) - 1)),
+            'penalty': '',
+            'position': pos,
+            'date': date,
+            'scoring': scoring,
+            'venue': venue,
+            'boat': '',
+            'boatName': teamBoatName,
+            'ratingType': ratingType,
+            'oldRating': oldRating,
+            'newRating': new_rating[0].ordinal(target=config.targetElo, alpha=200 / config.model.sigma),
+            'regAvg:': regattaAvg,
+            'calculatedAt': time.time()
+        })
+        
+        # 'cross': isCross,
+        # 'outLinks': outLinks
+        
 def getPartners(scores, config : Config):
     partnerKeys = scores['PartnerLink']
     partnerKeys = [pk if pk not in config.merges.keys() else config.merges[pk] for pk in partnerKeys]
@@ -134,7 +163,7 @@ def getRacers(people, scores, keys, teams, regatta):
 
     return racers
 
-def calculateFR(people : dict[str, Sailor], date, regatta, race, row, pos, scoring, season, regattaAvg, womens, config : Config):
+def calculateFR(newRaces : list, people : dict[str, Sailor], date, regatta, race, row, pos, scoring, season, regattaAvg, womens, config : Config):
     """Calculates new ratings and updates the rating, races, and rivals for a given fleet race. 
     """
     if pos.lower() not in ['skipper', 'crew']:
@@ -165,4 +194,4 @@ def calculateFR(people : dict[str, Sailor], date, regatta, race, row, pos, scori
 
     updateRatings(racers, ratings, pos, womens)
     
-    updateRaces(scores, racers, scoreVals, predictions, partnerKeys, partnerNames, startingRating, ratings, teams, teamBoatNames, race, scoring, season, date, womens, regattaAvg, pos, config)
+    updateRaces(newRaces, scores, racers, scoreVals, predictions, partnerKeys, partnerNames, startingRating, ratings, teams, teamBoatNames, race, scoring, season, date, womens, regattaAvg, pos, config)

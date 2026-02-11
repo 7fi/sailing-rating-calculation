@@ -99,13 +99,16 @@ def resetPeopleToBeforeSeason(people : list[Sailor], season):
 def calculateAllRaces(people, df_races, calculatedAtDict:dict, config: Config):
     leng = len(df_races['adjusted_raceID'].unique())
     regatta_groups = df_races.groupby(['Regatta'], sort=False)
+    
+    allFrRaces = []
+    allTrRaces = []
+    
     i = 0
     canSkipCalc = True
     dontNeedToCalc = ['sr','cr','wsr','wcr','tsr','tcr','wtsr','wtcr']
     
     for regatta_name, regatta_data in regatta_groups:
         season = regatta_data.iloc[0]['raceID'].split("/")[0]
-        
         
         scoring = getScoring(regatta_data)
 
@@ -114,20 +117,19 @@ def calculateAllRaces(people, df_races, calculatedAtDict:dict, config: Config):
         else:
             womens, regattaAvg = getWomensAndRegAvgFR(people, regatta_data, config)
             
-        ratingType = ('w' if womens else '') + ('t' if pos.lower() == 'skipper' else 'f') + 'r'
+        # ratingType = ('w' if womens else '') + ('t' if pos.lower() == 'skipper' else 'f') + 'r'
         
-        if canSkipCalc:
-            updatedAt = regatta_data.iloc[0]['updatedAt']
-            calculatedAt = calculatedAtDict.setdefault(season)
+        # if canSkipCalc:
+        #     updatedAt = regatta_data.iloc[0]['updatedAt']
+        #     calculatedAt = calculatedAtDict.setdefault(season)
             
-            if calculatedAt is None or updatedAt > calculatedAt:
-                canSkipCalc = False
-                # resetPeopleToBeforeSeason(season)
-                # print(people['carter-anderson'].races)
-                # raise NotImplementedError()
-            else:
-                continue
-        
+        #     if calculatedAt is None or updatedAt > calculatedAt:
+        #         canSkipCalc = False
+        #         # resetPeopleToBeforeSeason(season)
+        #         # print(people['carter-anderson'].races)
+        #         # raise NotImplementedError()
+        #     else:
+        #         continue
         
 
         race_groups = regatta_data.groupby(['Date', 'adjusted_raceID'], sort=False)
@@ -142,10 +144,10 @@ def calculateAllRaces(people, df_races, calculatedAtDict:dict, config: Config):
 
             for pos in ['Skipper', 'Crew']:
                 if scoring == 'team':
-                    calculateTR(people, date, row, pos, season, regattaAvg, womens, config)
+                    calculateTR(allTrRaces, people, date, row, pos, season, regattaAvg, womens, config)
                 else:
-                    calculateFR(people, date, regatta_name, race, row, pos, scoring, season, regattaAvg, womens, config)
-    return people
+                    calculateFR(allFrRaces, people, date, regatta_name, race, row, pos, scoring, season, regattaAvg, womens, config)
+    return people, allFrRaces, allTrRaces
 
 def upload(people : dict[str, Sailor], config: Config):
     # Create a connection
@@ -212,7 +214,7 @@ def main(rootDir : str = "", jupyter = False):
 
     print("Setup complete.\nStarting calculations.")
     
-    people = calculateAllRaces(people, df_races_full, calculatedAtDict, config)
+    people, allFrRaces, allTrRaces = calculateAllRaces(people, df_races_full, calculatedAtDict, config)
     people = calculateSailorRanks(people, config)
     updateSailorRatios(people)
     
@@ -226,6 +228,9 @@ def main(rootDir : str = "", jupyter = False):
         return people, df_races_full
     
     outputSailorsToFile(people, config)
+    
+    df_frAfter = pd.DataFrame(allFrRaces)
+    df_frAfter.to_parquet("postcalcfrraces.parquet")
     
     print("File output finished.")
     

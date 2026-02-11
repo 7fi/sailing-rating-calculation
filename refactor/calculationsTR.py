@@ -60,7 +60,7 @@ def getTeamVals(row, people : dict[str, Sailor], rowVal : str, rowBoatVal : str,
     
     return teamName, teamRacers, teamRatings
 
-def updateRacesForTeam(tLetter, index, racers, oppRacers, boats, starting, teamName, pos, season, womens, row, date, predictions, venue, regattaAvg, ratings, config : Config):
+def updateRacesForTeam(allRaces : list[dict], tLetter, index, racers, oppRacers, boats, starting, teamName, pos, season, womens, row, date, predictions, venue, regattaAvg, ratings, config : Config):
     oLetter = 'A' if tLetter == 'B' else 'B'
     tscore = row['team' + tLetter + 'Score'].iat[0]
     toutcome = row['team'+ tLetter + 'Outcome'].iat[0]
@@ -81,9 +81,10 @@ def updateRacesForTeam(tLetter, index, racers, oppRacers, boats, starting, teamN
 
         ratingType = 'wt' if womens else 't'
         ratingType += 'sr' if pos == 'Skipper' else 'cr'
+        raceID = row['raceID'].iat[0]
         
         racer.races.append({
-            'raceID': row['raceID'].iat[0], 'raceNum': int(row['raceNum'].iat[0]), 'round':  row['round'].iat[0],
+            'raceID': raceID, 'raceNum': int(row['raceNum'].iat[0]), 'round':  row['round'].iat[0],
             'pos': pos,
             'date': date,
             'womens': womens,
@@ -101,8 +102,35 @@ def updateRacesForTeam(tLetter, index, racers, oppRacers, boats, starting, teamN
             'type': 'team', 
             'calculatedAt': time.time()
             })
+        
+        allRaces.append({
+            'raceID': raceID,
+            'season': raceID.split("/")[0],
+            'regatta': raceID.split("/")[1],
+            'raceNumber': int(row['raceNum'].iat[0]), 
+            'round':  row['round'].iat[0],
+            'sailorID': racer.key,
+            'partnerID': partnerKey,
+            'partnerName': partnerName,
+            'opponentTeam': oppt,
+            'opponentNick': oppn,
+            'score': tscore,
+            'outcome': toutcome,
+            'predicted': 'win' if predictions[index][0] == 1 else 'lose',
+            'penalty': '',
+            'position': pos,
+            'date': date,
+            'venue': venue,
+            'boat': '',
+            'boatName': '',
+            'ratingType': ratingType,
+            'oldRating': oldRating,
+            'newRating': new_rating,
+            'regAvg': regattaAvg,
+            'calculatedAt': time.time()
+        })
 
-def calculateTR(people : dict[str, Sailor], date : str, row, pos : str, season : str, regattaAvg : float, womens : bool, config : Config):
+def calculateTR(allRaces : list[dict], people : dict[str, Sailor], date : str, row, pos : str, season : str, regattaAvg : float, womens : bool, config : Config):
     venue = row['Venue'].iat[0]
 
     teamAName, teamARacers, teamARatings = getTeamVals(row, people, 'teamAName', 'teamABoats', womens, pos, config)
@@ -115,7 +143,7 @@ def calculateTR(people : dict[str, Sailor], date : str, row, pos : str, season :
         # print("not enough sailors in this race, skipping", row['raceID'].iat[0])
         return
 
-    ranks = [1 if row['teamAOutcome'].iat[0] == 'win' else 2, 
+    ranks = [1 if row['teamAOutcome'].iat[0] == 'win' else 2,
              1 if row['teamBOutcome'].iat[0] == 'win' else 2]
     
     predictions = config.model.predict_rank([teamARatings, teamBRatings])
@@ -125,6 +153,6 @@ def calculateTR(people : dict[str, Sailor], date : str, row, pos : str, season :
     updateRatings(womens, teamARacers, teamARatings, pos)
     updateRatings(womens, teamBRacers, teamBRatings, pos)
     
-    updateRacesForTeam('A', 0, teamARacers, teamBRacers, row['teamABoats'].iat[0], startingARating, teamAName, pos, season, womens, row, date, predictions, venue, regattaAvg, teamARatings, config)
+    updateRacesForTeam(allRaces, 'A', 0, teamARacers, teamBRacers, row['teamABoats'].iat[0], startingARating, teamAName, pos, season, womens, row, date, predictions, venue, regattaAvg, teamARatings, config)
     
-    updateRacesForTeam('B', 1, teamBRacers, teamARacers, row['teamBBoats'].iat[0], startingBRating, teamBName, pos, season, womens, row, date, predictions, venue, regattaAvg, teamBRatings, config)
+    updateRacesForTeam(allRaces, 'B', 1, teamBRacers, teamARacers, row['teamBBoats'].iat[0], startingBRating, teamBName, pos, season, womens, row, date, predictions, venue, regattaAvg, teamBRatings, config)
