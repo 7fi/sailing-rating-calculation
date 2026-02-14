@@ -65,11 +65,9 @@ def getWomensAndRegAvgTR(people, regatta_data, config : Config):
 
     for oldkey, newkey in config.merges.items():
         if oldkey in skipper_keys:
-            skipper_keys = [
-                k if k != oldkey else newkey for k in skipper_keys]
+            skipper_keys = [k if k != oldkey else newkey for k in skipper_keys]
         if oldkey in crew_keys:
-            crew_keys = [
-                k if k != oldkey else newkey for k in crew_keys]
+            crew_keys = [k if k != oldkey else newkey for k in crew_keys]
 
     skippers = [people[k] for k in skipper_keys if k in people.keys()]
     crews = [people[k] for k in crew_keys if k in people.keys()]
@@ -92,61 +90,92 @@ def getWomensAndRegAvgTR(people, regatta_data, config : Config):
     
     return womens, regattaAvg
     
-def resetPeopleToBeforeSeason(people : list[Sailor], season):
+def resetPeopleToBeforeSeason(people : list[Sailor], season : str, ratingType: str):
     for person in people:
-        person.resetRatingToBeforeSeason()
+        person.resetRatingToBeforeSeason(season, ratingType)
+
+def calculateAllRegattaInfo(people, df_races, calculatedAtDict, config: Config):
+    print(f"Calculating regatta info (womens and regavg)")
+    regattaDict = {}
     
-def calculateAllRaces(people, df_races, calculatedAtDict:dict, config: Config):
-    leng = len(df_races['adjusted_raceID'].unique())
     regatta_groups = df_races.groupby(['Regatta'], sort=False)
-    
-    allFrRaces = []
-    allTrRaces = []
-    
-    i = 0
-    canSkipCalc = True
-    dontNeedToCalc = ['sr','cr','wsr','wcr','tsr','tcr','wtsr','wtcr']
-    
     for regatta_name, regatta_data in regatta_groups:
-        season = regatta_data.iloc[0]['raceID'].split("/")[0]
-        
         scoring = getScoring(regatta_data)
 
         if scoring == 'team':
             womens, regattaAvg = getWomensAndRegAvgTR(people, regatta_data, config)
         else:
             womens, regattaAvg = getWomensAndRegAvgFR(people, regatta_data, config)
-            
-        # ratingType = ('w' if womens else '') + ('t' if pos.lower() == 'skipper' else 'f') + 'r'
         
-        # if canSkipCalc:
-        #     updatedAt = regatta_data.iloc[0]['updatedAt']
-        #     calculatedAt = calculatedAtDict.setdefault(season)
-            
-        #     if calculatedAt is None or updatedAt > calculatedAt:
-        #         canSkipCalc = False
-        #         # resetPeopleToBeforeSeason(season)
-        #         # print(people['carter-anderson'].races)
-        #         # raise NotImplementedError()
-        #     else:
-        #         continue
+        ratingType = 'w' if womens else '' + 'tr' if scoring == 'team' else 'fr'
         
+        regattaDict[regatta_name] = {'scoring': scoring, 'womens': womens, 'regAvg': regattaAvg, 'ratingType': ratingType}    
 
-        race_groups = regatta_data.groupby(['Date', 'adjusted_raceID'], sort=False)
+    return regattaDict
+
+def calcAllRacesForRT(ratingType, people, df_races, allFrRaces, allTrRaces, calculatedAtDict: dict, config: Config):
+    print(f"Calculating all {ratingType} races")
+    leng = len(df_races['adjusted_raceID'].unique())
+    regatta_groups = df_races.groupby(['Regatta'], sort=False)
+    
+    i = 0
+    canSkipCalc = True
+    resetDate = None
+    
+    for regatta_name, regatta_data in regatta_groups:
+        season = regatta_data.iloc[0]['raceID'].split("/")[0]
+        scoring = regatta_data.iloc[0]['scoring']
+        regattaAvg = regatta_data.iloc[0]['regAvg']
+        womens = regatta_data.iloc[0]['womens']
+        date = regatta_data.iloc[0]['Date']
+        
+        if canSkipCalc:
+            updatedAt = regatta_data.iloc[0]['updatedAt']
+            calculatedAt = calculatedAtDict.setdefault(season)
+            
+            if calculatedAt is None or updatedAt > calculatedAt:
+                canSkipCalc = False
+                resetDate = date
+                print("Found point that needs to be calculated, resetting to before", date, ratingType)
+                # resetPeopleToBeforeSeason(people, season, ratingType)
+                # print(people['carter-anderson'].races)
+            else:
+                continue
+
+        race_groups = regatta_data.groupby(['adjusted_raceID'], sort=False)
         
         calculatedAtDict[season] = time.time()
 
         # Iterate through each race in this regatta
-        for (date, race), row in race_groups:
+        for (raceID), row in race_groups:
             i += 1
             if i % 1000 == 0:
                 print(f"Currently analyzing race {i}/{leng} in {regatta_name}, Date:{date}")
 
             for pos in ['Skipper', 'Crew']:
                 if scoring == 'team':
-                    calculateTR(allTrRaces, people, date, row, pos, season, regattaAvg, womens, config)
+                    calculateTR(allTrRaces, people, resetDate, date, row, pos, season, regattaAvg, womens, config)
                 else:
-                    calculateFR(allFrRaces, people, date, regatta_name, race, row, pos, scoring, season, regattaAvg, womens, config)
+                    calculateFR(allFrRaces, people, resetDate, date, regatta_name, raceID, row, pos, scoring, season, regattaAvg, womens, ratingType, config)
+    return people, allFrRaces, allTrRaces
+    
+def calculateAllRaces(people, df_races, regatta_info, calculatedAtDict: dict, config: Config):
+    allFrRaces = []
+    allTrRaces = []
+    
+    df_regatta_info = pd.DataFrame(regatta_info).T
+    df_regatta_info = df_regatta_info.reset_index().rename(columns={'level_0': 'Regatta'})
+
+    for rt in ['fr', 'wfr', 'tr', 'wtr']:
+        df_races_filtered = df_races.merge(
+            df_regatta_info,
+            on='Regatta',
+            how='inner'
+        )
+        df_races_filtered = df_races_filtered[df_races_filtered['ratingType'] == rt]
+                
+        people, allFrRaces, allTrRaces = calcAllRacesForRT(rt, people, df_races_filtered, allFrRaces, allTrRaces, calculatedAtDict, config)
+    
     return people, allFrRaces, allTrRaces
 
 def upload(people : dict[str, Sailor], config: Config):
@@ -196,10 +225,8 @@ def load(rootDir : str, config: Config):
             calculatedAtDict = json.load(f)
     except FileNotFoundError:
         calculatedAtDict = {}
-    print(calculatedAtDict)
     
     return df_races_full, df_sailor_info, df_sailor_ratings, calculatedAtDict
-
 
 def main(rootDir : str = "", jupyter = False):
     
@@ -214,13 +241,13 @@ def main(rootDir : str = "", jupyter = False):
 
     print("Setup complete.\nStarting calculations.")
     
-    people, allFrRaces, allTrRaces = calculateAllRaces(people, df_races_full, calculatedAtDict, config)
+    regatta_info = calculateAllRegattaInfo(people, df_races_full, calculatedAtDict, config)
+    people, allFrRaces, allTrRaces = calculateAllRaces(people, df_races_full, regatta_info, calculatedAtDict, config)
     people = calculateSailorRanks(people, config)
     updateSailorRatios(people)
     
     print("Calculations finished.\nOutputting to files")
     
-    print(calculatedAtDict)
     with open("calculated_at_dict.json", "w") as f:
         json.dump(calculatedAtDict, f)
     

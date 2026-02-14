@@ -1,6 +1,6 @@
 from config import Config
 from openskill.models import PlackettLuceRating, PlackettLuce
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import ClassVar
 from multiprocessing import Pool
 from concurrent.futures import ThreadPoolExecutor
@@ -49,6 +49,8 @@ class Sailor:
 
     avgSkipperRatio : int = 0
     avgCrewRatio : int = 0
+    
+    ratingTypesReset : list[str] = field(default_factory=list)
         
     def getRating(self, position : str, raceType : str, womens: bool):
         pos = position.lower()
@@ -78,8 +80,8 @@ class Sailor:
         return len([race for race in self.races if 'cross' in race.keys() and race['cross']])
     
     def isRankEligible(self, targetSeasons, pos, gradCutoff, needsOutlinks=True):
-        if self.year is None:
-            print(f"{self.key} has none year")
+        if self.year is None or self.year == "?? *":
+            # print(f"{self.key} has none year")
             return False
         
         try:
@@ -92,6 +94,7 @@ class Sailor:
             else: 
                 return False
         except ValueError as e:
+            print(self.year)
             print(e)
             print(f"error happened to {self.key}")
             return False
@@ -110,30 +113,48 @@ class Sailor:
         self.womenSkipperRankTR = 0
         self.womenCrewRankTR = 0
         
-    def resetRatingToBeforeSeason(self, season):
+    def resetRatingToBeforeDate(self, resetDate, ratingType):
+        if ratingType not in self.ratingTypesReset:
+            self.ratingTypesReset.append(ratingType)
+        
+        for pos in ['s', 'c']:
+            newRT = 'w' if 'w' in ratingType else '' + 't' if 't' in ratingType else '' + pos + 'r'
+            lastRaceBeforeReset = [r for r in self.races if r['Date'] < resetDate and r['ratingType'] == newRT][-1]
+            
+            # reset rating to rating after that race
+            setattr(self, newRT, lastRaceBeforeReset['newRating'])
+            
+            # cut out future races that will be recalculated
+            self.races = [r for r in self.races if r['ratingType'] != newRT or r['Date'] < resetDate]
+        
+        
+    def resetRatingToBeforeSeason(self, season, ratingType):
         # find the race before this race (assumes races are sorted)
-        seasonIndex = list(map(lambda r: r['raceID'].split("/")[0], self.races)).index(season)
-        
-        ratingTypes = ['sr','cr','wsr','wcr','tsr','tcr','wtsr','wtcr']
-        for rt in ratingTypes:
-            for i in range(seasonIndex, -0, -1):
-                if self.races[i]['ratingType'] == rt:
-                    # set rating type to rating
-                    rating = self.races[i]['newRating']
-                    setattr(self, rt, rating)
-        
-        self.races = self.races[:seasonIndex]
-        
         seasons = [sub for s in [[f"s{i}",f"f{i}"] for i in range(10,27)] for sub in s]
         seasonsToRemove = seasons[seasons.index(season) + 1:]
         
+        raceSeasons = list(map(lambda r: r['raceID'].split("/")[0], self.races))
+        seasonIndex = raceSeasons.index(season)
+        
+        for i in range(seasonIndex, 0, -1):
+            if self.races[i]['ratingType'] == ratingType:
+                # set rating type to rating
+                rating = self.races[i]['newRating']
+                setattr(self, ratingType, rating)
+                break
+        
+        # remove races that will be re-calculated
+        self.races = [r for r in self.races if r['raceID'].split("/")[0] not in seasonsToRemove and r['ratingType'] == ratingType]
+        
+        # TODO: Rivals are cooked here now...
+        
         # delete all future rivals
-        for pos in ['skipper', 'crew']:
-            for sailor in self.rivals[pos].keys():
-                    for s in self.rivals[pos][sailor]['races'].keys():
-                        if s in seasonsToRemove:
-                            self.rivals[pos][sailor]['races'][s] = 0
-                            self.rivals[pos][sailor]['wins'][s] = 0
+        # for pos in ['skipper', 'crew']:
+        #     for sailor in self.rivals[pos].keys():
+        #             for s in self.rivals[pos][sailor]['races'].keys():
+        #                 if s in seasonsToRemove:
+        #                     self.rivals[pos][sailor]['races'][s] = 0
+        #                     self.rivals[pos][sailor]['wins'][s] = 0
         
     def __repr__(self):
         config = Config()

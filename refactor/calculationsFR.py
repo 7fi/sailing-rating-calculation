@@ -20,21 +20,24 @@ def updateRatings(racers : list[Sailor], ratings : list[PlackettLuceRating], pos
 
 def updateRivals(sailor : Sailor, season, score, racers, scoreVals, pos):
     for other, otherScore in zip(racers, scoreVals):
-        if other.key != sailor.key:
-            if pos not in sailor.rivals:
-                sailor.rivals[pos] = {}
+        if other.key == sailor.key:
+            continue
+        
+        wonThisRace = (1 if otherScore > score else 0)
+        
+        rival = sailor.rivals.setdefault(pos, # try and grab counts for this position, with fallback
+                                         {}).setdefault(
+            other.key, # try and grab the info about the other sailor, with fallback
+            {
+                'name': other.name,
+                'races': {},
+                'team': other.teams[-1],
+                'wins': {}
+            }
+        )
 
-            if other.key not in sailor.rivals[pos]:
-                sailor.rivals[pos][other.key] = {'name': other.name, 'races': {}, 'team': other.teams[-1], 'wins': {}}
-
-            if season not in sailor.rivals[pos][other.key]['races'].keys():
-                sailor.rivals[pos][other.key]['races'][season] = 0
-            if season not in sailor.rivals[pos][other.key]['wins'].keys():
-                sailor.rivals[pos][other.key]['wins'][season] = 0
-
-            sailor.rivals[pos][other.key]['races'][season] += 1
-            if otherScore > score:
-                sailor.rivals[pos][other.key]['wins'][season] += 1
+        rival['races'][season] = rival['races'].get(season, 0) + 1
+        rival['wins'][season] = rival['wins'].get(season, 0) + wonThisRace
                 
 def updateSeasons(sailor, season, team, pos):
     if season not in [s[0] for s in sailor.seasons[pos.lower()]]:
@@ -84,7 +87,7 @@ def updateRaces(newRaces, scores, racers : list[Sailor], scoreVals, predictions,
 
         updateSeasons(sailor, season, team, pos)
 
-        updateRivals(sailor, season, score, racers, scoreVals, pos)
+        # updateRivals(sailor, season, score, racers, scoreVals, pos)
 
         ratingType = ('w' if womens else '') + ('s' if pos.lower() == 'skipper' else 'c') + 'r'
         
@@ -148,12 +151,12 @@ def getPartners(scores, config : Config):
     
     return partnerKeys, partnerNames
 
-def getRacers(people, scores, keys, teams, regatta):
+def getRacers(people : list[Sailor], scores, keys, teams, regatta, resetDate, date, ratingType):
     names = scores['Sailor']  # the sailor names
     
+    # Grab people objects
     racers = []
     try:
-        # Grab people objects
         racers = [people[key] if key != 'Unknown'
                   and key is not None
                   else people[name + "-" + team] for key, name, team in zip(keys, names, teams)]
@@ -161,9 +164,19 @@ def getRacers(people, scores, keys, teams, regatta):
         print(regatta)
         raise e
 
+    # Handle resetting if necessary: 
+    if resetDate is None:
+        return racers
+
+    for racer in racers:
+        if ratingType in racer['ratingTypesReset']:
+            continue
+        
+        racer.resetRatingToBeforeDate(resetDate, ratingType)
+
     return racers
 
-def calculateFR(newRaces : list, people : dict[str, Sailor], date, regatta, race, row, pos, scoring, season, regattaAvg, womens, config : Config):
+def calculateFR(newRaces : list, people : dict[str, Sailor], resetDate, date, regatta, race, row, pos, scoring, season, regattaAvg, womens, ratingType, config : Config):
     """Calculates new ratings and updates the rating, races, and rivals for a given fleet race. 
     """
     if pos.lower() not in ['skipper', 'crew']:
@@ -180,7 +193,7 @@ def calculateFR(newRaces : list, people : dict[str, Sailor], date, regatta, race
     if np.isnan(scoreVals[0]):  # B division did not complete the set
         return
 
-    racers : list[Sailor] = getRacers(people, scores, keys, teams,regatta)
+    racers : list[Sailor] = getRacers(people, scores, keys, teams, regatta, resetDate, date, ratingType)
 
     partnerKeys , partnerNames = getPartners(scores, config)
 
