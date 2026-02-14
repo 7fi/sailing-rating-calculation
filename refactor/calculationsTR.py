@@ -130,7 +130,7 @@ def updateRacesForTeam(allRaces : list[dict], tLetter, index, racers, oppRacers,
             'calculatedAt': time.time()
         })
 
-def calculateTR(allRaces : list[dict], people : dict[str, Sailor], date : str, row, pos : str, season : str, regattaAvg : float, womens : bool, config : Config):
+def calculateTR(allRaces : list[dict], people : dict[str, Sailor], resetDate, date : str, row, pos : str, season : str, regattaAvg : float, womens : bool, config : Config):
     venue = row['Venue'].iat[0]
 
     teamAName, teamARacers, teamARatings = getTeamVals(row, people, 'teamAName', 'teamABoats', womens, pos, config)

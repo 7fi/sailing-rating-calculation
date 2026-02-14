@@ -104,6 +104,8 @@ def updateRaces(newRaces, scores, racers : list[Sailor], scoreVals, predictions,
             'ratingType': ratingType,
             'oldRating': oldRating,
             'newRating': new_rating[0].ordinal(target=config.targetElo, alpha=200 / config.model.sigma),
+            'newMu': new_rating[0].mu,
+            'newSigma':new_rating[0].sigma,
             'womens': womens,
             'date': date,
             'partner': {'name': partnerName, 'key': partnerKey},
@@ -169,7 +171,7 @@ def getRacers(people : list[Sailor], scores, keys, teams, regatta, resetDate, da
         return racers
 
     for racer in racers:
-        if ratingType in racer['ratingTypesReset']:
+        if ratingType in racer.ratingTypesReset:
             continue
         
         racer.resetRatingToBeforeDate(resetDate, ratingType)

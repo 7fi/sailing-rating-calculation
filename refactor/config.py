@@ -29,5 +29,5 @@ class Config:
     sailorInfoFile = 'sailor_data2.parquet'
     
     doScrape : bool = False
-    calcAll : bool = True
+    calcAll : bool = False
     doUpload : bool = False

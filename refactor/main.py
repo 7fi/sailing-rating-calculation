@@ -119,7 +119,7 @@ def calcAllRacesForRT(ratingType, people, df_races, allFrRaces, allTrRaces, calc
     regatta_groups = df_races.groupby(['Regatta'], sort=False)
     
     i = 0
-    canSkipCalc = True
+    canSkipCalc = not config.calcAll
     resetDate = None
     
     for regatta_name, regatta_data in regatta_groups:
@@ -137,8 +137,6 @@ def calcAllRacesForRT(ratingType, people, df_races, allFrRaces, allTrRaces, calc
                 canSkipCalc = False
                 resetDate = date
                 print("Found point that needs to be calculated, resetting to before", date, ratingType)
-                # resetPeopleToBeforeSeason(people, season, ratingType)
-                # print(people['carter-anderson'].races)
             else:
                 continue
 
@@ -147,16 +145,16 @@ def calcAllRacesForRT(ratingType, people, df_races, allFrRaces, allTrRaces, calc
         calculatedAtDict[season] = time.time()
 
         # Iterate through each race in this regatta
-        for (raceID), row in race_groups:
+        for raceID, row in race_groups:
             i += 1
             if i % 1000 == 0:
-                print(f"Currently analyzing race {i}/{leng} in {regatta_name}, Date:{date}")
+                print(f"Currently analyzing race {i}/{leng} in {regatta_name[0]}, Date:{date}")
 
             for pos in ['Skipper', 'Crew']:
                 if scoring == 'team':
                     calculateTR(allTrRaces, people, resetDate, date, row, pos, season, regattaAvg, womens, config)
                 else:
-                    calculateFR(allFrRaces, people, resetDate, date, regatta_name, raceID, row, pos, scoring, season, regattaAvg, womens, ratingType, config)
+                    calculateFR(allFrRaces, people, resetDate, date, regatta_name, raceID[0], row, pos, scoring, season, regattaAvg, womens, ratingType, config)
     return people, allFrRaces, allTrRaces
     
 def calculateAllRaces(people, df_races, regatta_info, calculatedAtDict: dict, config: Config):

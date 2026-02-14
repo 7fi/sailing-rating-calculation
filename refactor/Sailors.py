@@ -52,7 +52,7 @@ class Sailor:
     
     ratingTypesReset : list[str] = field(default_factory=list)
         
-    def getRating(self, position : str, raceType : str, womens: bool):
+    def getRating(self, position : str, raceType : str, womens: bool, ordinal : bool = False, config : Config = None):
         pos = position.lower()
         typ = raceType.lower()
         if pos not in ('skipper', 'crew') or typ not in ('fleet', 'team'):
@@ -61,7 +61,11 @@ class Sailor:
         prefix = 'w' if womens else ''
         prefix += 't' if typ == 'team' else ''
         part = 's' if pos == 'skipper' else 'c'
-        return getattr(self, f"{prefix}{part}r")
+        ratingObj = getattr(self, f"{prefix}{part}r")
+        if ordinal and Config is not None:
+            return ratingObj.ordinal(target=config.targetElo,
+                                       alpha=config.alpha)
+        return ratingObj
     
     def getSeasonRaceCount(self, season, pos):
         return len([r for r in self.races if r['raceID'].split("/")[0] == season and r['pos'].lower() == pos.lower()])
@@ -119,13 +123,18 @@ class Sailor:
         
         for pos in ['s', 'c']:
             newRT = 'w' if 'w' in ratingType else '' + 't' if 't' in ratingType else '' + pos + 'r'
-            lastRaceBeforeReset = [r for r in self.races if r['Date'] < resetDate and r['ratingType'] == newRT][-1]
+            racesBeforeReset = [r for r in self.races if r['date'] < resetDate and r['ratingType'] == newRT]
+            
+            if len(racesBeforeReset) > 0:
+                lastRaceBeforeReset = racesBeforeReset[-1]
+            else: 
+                continue
             
             # reset rating to rating after that race
-            setattr(self, newRT, lastRaceBeforeReset['newRating'])
+            setattr(self, newRT, PlackettLuceRating(lastRaceBeforeReset['newMu'], lastRaceBeforeReset['newSigma']))
             
             # cut out future races that will be recalculated
-            self.races = [r for r in self.races if r['ratingType'] != newRT or r['Date'] < resetDate]
+            self.races = [r for r in self.races if r['ratingType'] != newRT or r['date'] < resetDate]
         
         
     def resetRatingToBeforeSeason(self, season, ratingType):
@@ -177,6 +186,16 @@ def make_sailor(config, args):
         wtsr=ratings[6], wtcr=ratings[7],
     )
 
+def createSailor(sd):
+    return Sailor(sd['Sailor'], sd['key'], sd['gender'], sd['GradYear'], sd['Links'], sd['Teams'], sd['Seasons'], sd['Races'], sd['Rivals'],     
+            PlackettLuceRating(sd['srMU'], sd['srSigma']),
+            PlackettLuceRating(sd['crMU'], sd['crSigma']),
+            PlackettLuceRating(sd['wsrMU'], sd['wsrSigma']),
+            PlackettLuceRating(sd['wcrMU'], sd['wcrSigma']),
+            PlackettLuceRating(sd['tsrMU'], sd['tsrSigma']),
+            PlackettLuceRating(sd['tcrMU'], sd['tcrSigma']),
+            PlackettLuceRating(sd['wtsrMU'], sd['wtsrSigma']),
+            PlackettLuceRating(sd['wtcrMU'], sd['wtcrSigma']), sd['Cross'], sd['outLinks'], sd['SkipperRank'], sd['CrewRank'], sd['WomenSkipperRank'], sd['WomenCrewRank'], sd['TRSkipperRank'], sd['TRCrewRank'],sd['TRWomenSkipperRank'], sd['TRWomenCrewRank'], sd['skipperAvgRatio'], sd['crewAvgRatio'])
 
 def setupPeople(df_sailor_ratings, df_sailor_info, config: Config):
     if config.calcAll:
@@ -185,40 +204,17 @@ def setupPeople(df_sailor_ratings, df_sailor_info, config: Config):
         return dict(results)
     
     else:
-        raise NotImplementedError
-        people = {row.key: Sailor(row.Sailor, row.key, row.GradYear, row.Links, row.Teams, row.Seasons, row.Races, row.Rivals,
-                                  config.model.create_rating(
-                                      [row.srMU, row.srSigma], row.key),
-                                  config.model.create_rating(
-                                      [row.crMU, row.crSigma], row.key),
-                                  config.model.create_rating(
-                                      [row.wsrMU, row.wsrSigma], row.key),
-                                  config.model.create_rating(
-                                      [row.wcrMU, row.wcrSigma], row.key),
-                                  config.model.create_rating(
-                                      [row.tsrMU, row.tsrSigma], row.key),
-                                  config.model.create_rating(
-                                      [row.tcrMU, row.tcrSigma], row.key),
-                                  config.model.create_rating(
-                                      [row.wtsrMU, row.wtsrSigma], row.key),
-                                  config.model.create_rating(
-                                      [row.wtcrMU, row.wtcrSigma], row.key),
-                                  gender=row.gender) for row in df_sailor_ratings.itertuples()}
+        people = {}
+        for i, row in df_sailor_ratings.iterrows():
+            people[row.key] = createSailor(row.to_dict())
 
-        for key in df_sailor_info['key']:
-            if key not in people.keys():
-                row = df_sailor_info.loc[df_sailor_info['key'] == key].iloc[0]
-                people[key] = Sailor(row.name, row.key, row.year, [row.link], [row.team], {'skipper': [], 'crew': []}, [], {},
-                                     config.model.rating(),
-                                     config.model.rating(),
-                                     config.model.rating(),
-                                     config.model.rating(),
-                                     config.model.rating(),
-                                     config.model.rating(),
-                                     config.model.rating(),
-                                     config.model.rating(),
-                                     gender=row.gender)
+        pplkeys = people.keys()
+        rows = [row for row in df_sailor_info.itertuples(index=False, name=None) if row[0] not in pplkeys]
+        results = map(partial(make_sailor, config), rows)
+        newPeople = dict(results)
         
+        people.update(newPeople)
+        return people
 
 def handleMerges(df_races, people, config : Config):
     # merge sailor objects
@@ -252,7 +248,7 @@ def outputSailorsToFile(people, config: Config ):
 
         allRows.append([p.name, len(p.races), sailor,
                         p.skipperRank, p.crewRank, p.womenSkipperRank,
-                        p.womenCrewRank, p.skipperRankTR, p.womenSkipperRankTR,
+                        p.womenCrewRank, p.skipperRankTR, p.womenSkipperRankTR, p.crewRankTR, p.womenCrewRankTR,
                         p.teams,
                         p.gender,
                         p.sr.ordinal(target=config.targetElo,
@@ -287,7 +283,7 @@ def outputSailorsToFile(people, config: Config ):
                             for race in p.races if 'cross' in race.keys()]),
                         p.races, p.rivals, p.avgSkipperRatio, p.avgCrewRatio])
 
-    df_sailors = pd.DataFrame(allRows, columns=['Sailor', 'numRaces', 'key', 'SkipperRank', 'CrewRank', 'WomenSkipperRank', 'WomenCrewRank', 'TRSkipperRank', 'TRWomenSkipperRank', 'Teams', 'gender',
+    df_sailors = pd.DataFrame(allRows, columns=['Sailor', 'numRaces', 'key', 'SkipperRank', 'CrewRank', 'WomenSkipperRank', 'WomenCrewRank', 'TRSkipperRank', 'TRWomenSkipperRank', 'TRCrewRank', 'TRWomenCrewRank', 'Teams', 'gender',
                                                 'srOrd',
                                                 'crOrd',
                                                 'wsrOrd',
@@ -308,7 +304,7 @@ def outputSailorsToFile(people, config: Config ):
                                                 'Seasons', 'Cross', 'Races',  'Rivals', 'skipperAvgRatio', 'crewAvgRatio'])
 
     # df_sailors.to_json(f'sailors-{date.today().strftime("%Y%m%d")}.json', index=False)
-    df_sailors.to_json(f'sailors-latest.json', index=False)
+    df_sailors.to_json(f'sailors-latest-testing.json', index=False)
     df_sailors = df_sailors.sort_values(
         by='numRaces', ascending=False).reset_index(drop=True)
     
