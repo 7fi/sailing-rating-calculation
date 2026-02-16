@@ -2,8 +2,9 @@ import numpy as np
 import pandas as pd
 from collections import defaultdict
 import time
+from config import Config
 
-def buildRivals(dfr: pd.DataFrame):
+def buildRivals(dfr: pd.DataFrame, config: Config):
 
     # Split fleet and team races
     dfr["season"] = dfr["adjusted_raceID"].str.split("/").str[0]
@@ -31,7 +32,7 @@ def buildRivals(dfr: pd.DataFrame):
 
     # Season + Position IDs (fleet defines universe)
     season_ids = {s: i for i, s in enumerate(dfr["season"].dropna().unique())}
-    pos_ids = {p: i for i, p in enumerate(dfr["Position"].dropna().unique())}
+    pos_ids = {p: i for i, p in enumerate(['Skipper', 'Crew'])}
 
     # Map fleet dataframe to integer IDs
     fleet_df["sailor_id"] = fleet_df["key"].map(sailor_ids)
@@ -135,9 +136,7 @@ def buildRivals(dfr: pd.DataFrame):
                     rivals[key_ab][1] += 1
                     rivals[key_ba][1] += 1
 
-    # --------------------------------------------------
     # Flatten for export
-    # --------------------------------------------------
     rows = []
 
     for (a, pos_id, b, season_id), (wins, total) in rivals.items():
@@ -153,17 +152,16 @@ def buildRivals(dfr: pd.DataFrame):
 
     df_out = pd.DataFrame(rows)
     
-    # --------------------------------------------------
     # Convert ID → original string keys
-    # --------------------------------------------------
     sailor_lookup = {v: k for k, v in sailor_ids.items()}
 
     df_out["sailor_key"] = df_out["sailor_id"].map(sailor_lookup)
     df_out["opponent_key"] = df_out["opponent_id"].map(sailor_lookup)
+    
+    df_out["sailor_key"] = df_out["sailor_key"].replace(config.merges)
+    df_out["opponent_key"] = df_out["opponent_key"].replace(config.merges)
 
-    # --------------------------------------------------
     # Add opponent metadata (no merge needed)
-    # --------------------------------------------------
     df_out["opponent_fullname"] = df_out["opponent_id"].map(
         lambda x: sailor_meta.get(x, {}).get("Sailor")
     )
@@ -172,18 +170,14 @@ def buildRivals(dfr: pd.DataFrame):
         lambda x: sailor_meta.get(x, {}).get("Team")
     )
 
-    # --------------------------------------------------
     # Convert season / position IDs back to labels
-    # --------------------------------------------------
     season_lookup = {v: k for k, v in season_ids.items()}
     pos_lookup = {v: k for k, v in pos_ids.items()}
 
     df_out["season"] = df_out["season_id"].map(season_lookup)
     df_out["position"] = df_out["pos_id"].map(pos_lookup)
 
-    # --------------------------------------------------
     # Keep only final columns in correct order
-    # --------------------------------------------------
     df_out = df_out[
         [
             "sailor_key",
@@ -217,7 +211,6 @@ def uploadRivals(df_rivals, connection, batch_size=10_000):
     connection.commit()
 
 if __name__ == "__main__":
-    # dfr = pd.read_parquet('racesfrtest.parquet')
     df_races_fr = pd.read_parquet("racesfrtest.parquet")
     df_races_tr = pd.read_parquet("racesTR.parquet")
         
@@ -228,7 +221,10 @@ if __name__ == "__main__":
     
     dfr = df_races_full.sort_values(['Date', 'raceNum', 'Div']).reset_index(drop=True)
     
+    config = Config()
+    
     start = time.time()
-    df_out = buildRivals(dfr)
+    df_out = buildRivals(dfr, config)
     print(time.time()-start)
+    
     df_out.to_parquet('rivalstesting.parquet')

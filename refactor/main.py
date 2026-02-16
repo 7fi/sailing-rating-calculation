@@ -258,6 +258,8 @@ def main(rootDir : str = "", jupyter = False):
     
     outputSailorsToFile(people, config)
     
+    df_rivals.to_parquet('rivalstesting.parquet')
+    
     df_frAfter = pd.DataFrame(allFrRaces)
     df_frAfter.to_parquet("postcalcfrraces.parquet")
     
