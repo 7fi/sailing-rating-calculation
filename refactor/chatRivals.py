@@ -5,71 +5,74 @@ import time
 
 def buildRivals(dfr: pd.DataFrame):
 
-    # --------------------------------------------------
-    # 1️⃣  Precompute season column ONCE
-    # --------------------------------------------------
-    dfr = dfr.copy()
+    # Split fleet and team races
     dfr["season"] = dfr["adjusted_raceID"].str.split("/").str[0]
+    fleet_df = dfr[dfr["Scoring"] != "fleet"].copy()
+    team_df = dfr[dfr["Scoring"] == "team"].copy()
 
-    # --------------------------------------------------
-    # 2️⃣  Convert sailors, seasons, positions to int IDs
-    # --------------------------------------------------
-    sailor_ids = {k: i for i, k in enumerate(dfr["key"].unique())}
-    season_ids = {s: i for i, s in enumerate(dfr["season"].unique())}
-    pos_ids = {p: i for i, p in enumerate(dfr["Position"].unique())}
+    # Build sailor ID map from ALL races
+    fleet_keys = set(fleet_df["key"].dropna().unique())
 
-    dfr["sailor_id"] = dfr["key"].map(sailor_ids)
-    dfr["season_id"] = dfr["season"].map(season_ids)
-    dfr["pos_id"] = dfr["Position"].map(pos_ids)
+    team_keys = set()
+    for _, row in team_df.iterrows():
+        for boat in row.get("teamABoats", []):
+            if boat.get("skipperKey"):
+                team_keys.add(boat["skipperKey"])
+            if boat.get("crewKey"):
+                team_keys.add(boat["crewKey"])
+        for boat in row.get("teamBBoats", []):
+            if boat.get("skipperKey"):
+                team_keys.add(boat["skipperKey"])
+            if boat.get("crewKey"):
+                team_keys.add(boat["crewKey"])
 
-    # --------------------------------------------------
-    # 3️⃣  Extract numpy arrays ONCE
-    # --------------------------------------------------
-    sailor_arr = dfr["sailor_id"].to_numpy()
-    score_arr = dfr["Score"].to_numpy()
+    all_keys = fleet_keys.union(team_keys)
+    sailor_ids = {k: i for i, k in enumerate(all_keys)}
 
-    # Store metadata separately (only once per sailor)
+    # Season + Position IDs (fleet defines universe)
+    season_ids = {s: i for i, s in enumerate(dfr["season"].dropna().unique())}
+    pos_ids = {p: i for i, p in enumerate(dfr["Position"].dropna().unique())}
+
+    # Map fleet dataframe to integer IDs
+    fleet_df["sailor_id"] = fleet_df["key"].map(sailor_ids)
+    fleet_df["season_id"] = fleet_df["season"].map(season_ids)
+    fleet_df["pos_id"] = fleet_df["Position"].map(pos_ids)
+
+    sailor_arr = fleet_df["sailor_id"].to_numpy()
+    score_arr = fleet_df["Score"].to_numpy()
+
+    # Sailor metadata (for export later)
     sailor_meta = (
-        dfr[["sailor_id", "Sailor", "Team"]]
+        fleet_df[["sailor_id", "Sailor", "Team"]]
         .drop_duplicates("sailor_id")
         .set_index("sailor_id")
         .to_dict("index")
     )
 
-    # --------------------------------------------------
-    # 4️⃣  Group by race using indices (FAST)
-    # --------------------------------------------------
-    grouped = dfr.groupby(
+    # Group fleet races (FAST)
+    grouped = fleet_df.groupby(
         ["adjusted_raceID", "season_id", "pos_id"]
     ).indices
 
-    # Flat rival dictionary
-    # key: (a_id, pos_id, b_id, season_id)
-    # value: [wins, total]
-    rivals = defaultdict(lambda: [0, 0])
+    rivals = defaultdict(lambda: [0, 0])  # [wins, total]
 
-    # --------------------------------------------------
-    # 5️⃣  Main computation loop
-    # --------------------------------------------------
+    # Fleet race processing
     for (race_id, season_id, pos_id), idx in grouped.items():
 
         race_sailors = sailor_arr[idx]
         race_scores = score_arr[idx]
 
-        # Sort by score (lower score = better finish)
         order = race_scores.argsort()
         race_sailors = race_sailors[order]
 
         n = len(race_sailors)
 
-        # Pairwise comparisons
         for i in range(n):
             a = race_sailors[i]
 
             for j in range(i + 1, n):
                 b = race_sailors[j]
 
-                # a beat b
                 key_win = (a, pos_id, b, season_id)
                 key_loss = (b, pos_id, a, season_id)
 
@@ -77,8 +80,63 @@ def buildRivals(dfr: pd.DataFrame):
                 rivals[key_win][1] += 1
                 rivals[key_loss][1] += 1
 
+    # Team race processing
+    for _, row in team_df.iterrows():
+
+        season = row.get("season")
+        if season not in season_ids:
+            continue
+
+        season_id = season_ids[season]
+
+        teamA_won = row.get("teamAOutcome") == "win"
+        teamB_won = row.get("teamBOutcome") == "win"
+
+        if not teamA_won and not teamB_won:
+            continue  # skip ties
+
+        for pos in ["Skipper", "Crew"]:
+
+            pos_id = pos_ids[pos]
+
+            teamA_ids = []
+            teamB_ids = []
+
+            for boat in row.get("teamABoats", []):
+                key = boat.get(pos.lower() + "Key")
+                if key in sailor_ids:
+                    teamA_ids.append(sailor_ids[key])
+
+            for boat in row.get("teamBBoats", []):
+                key = boat.get(pos.lower() + "Key")
+                if key in sailor_ids:
+                    teamB_ids.append(sailor_ids[key])
+
+            # if either list is empty
+            if not teamA_ids or not teamB_ids:
+                continue
+
+            if teamA_won:
+                winners = teamA_ids
+                losers = teamB_ids
+            else:
+                winners = teamB_ids
+                losers = teamA_ids
+
+            for a in winners:
+                for b in losers:
+                    key_ab = (a, pos_id, b, season_id)
+                    key_ba = (b, pos_id, a, season_id)
+
+                    # add win
+                    rivals[key_ab][0] += 1
+                    
+                    # add totals
+                    rivals[key_ab][1] += 1
+                    rivals[key_ba][1] += 1
+
     # --------------------------------------------------
-    # 6️⃣  Flatten for export
+    # Flatten for export
     # --------------------------------------------------
     rows = []
 
@@ -86,7 +144,7 @@ def buildRivals(dfr: pd.DataFrame):
 
         rows.append({
             "sailor_id": a,
-            "position_id": pos_id,
+            "pos_id": pos_id,
             "opponent_id": b,
             "season_id": season_id,
             "wins": wins,
@@ -95,45 +153,37 @@ def buildRivals(dfr: pd.DataFrame):
 
     df_out = pd.DataFrame(rows)
     
+    # --------------------------------------------------
+    # Convert ID → original string keys
+    # --------------------------------------------------
     sailor_lookup = {v: k for k, v in sailor_ids.items()}
+
     df_out["sailor_key"] = df_out["sailor_id"].map(sailor_lookup)
     df_out["opponent_key"] = df_out["opponent_id"].map(sailor_lookup)
-    
-    sailor_meta = (
-    dfr[["key", "sailor_id", "Sailor", "Team"]]
-        .drop_duplicates("sailor_id")
-        .copy()
+
+    # --------------------------------------------------
+    # Add opponent metadata (no merge needed)
+    # --------------------------------------------------
+    df_out["opponent_fullname"] = df_out["opponent_id"].map(
+        lambda x: sailor_meta.get(x, {}).get("Sailor")
     )
 
-    df_out = df_out.merge(
-    sailor_meta.rename(columns={
-        "sailor_id": "opponent_id",
-        "Sailor": "opponent_fullname",
-        "Team": "opponent_team",
-        "key": "opponent_key_check"
-    }),
-    on="opponent_id",
-    how="left"
-)
+    df_out["opponent_team"] = df_out["opponent_id"].map(
+        lambda x: sailor_meta.get(x, {}).get("Team")
+    )
 
+    # --------------------------------------------------
+    # Convert season / position IDs back to labels
+    # --------------------------------------------------
     season_lookup = {v: k for k, v in season_ids.items()}
     pos_lookup = {v: k for k, v in pos_ids.items()}
 
-    # Convert IDs back to readable labels
     df_out["season"] = df_out["season_id"].map(season_lookup)
-    df_out["position"] = df_out["position_id"].map(pos_lookup)
+    df_out["position"] = df_out["pos_id"].map(pos_lookup)
 
-    # Drop internal ID columns
-    df_out = df_out.drop(
-        columns=[
-            "sailor_id",
-            "opponent_id",
-            "season_id",
-            "position_id",
-            "opponent_key_check"  # optional
-        ]
-    )
-    
+    # --------------------------------------------------
+    # Keep only final columns in correct order
+    # --------------------------------------------------
     df_out = df_out[
         [
             "sailor_key",
@@ -146,7 +196,7 @@ def buildRivals(dfr: pd.DataFrame):
             "wins",
         ]
     ]
-
+    
     return df_out
 
 def uploadRivals(df_rivals, connection, batch_size=10_000):
@@ -167,7 +217,17 @@ def uploadRivals(df_rivals, connection, batch_size=10_000):
     connection.commit()
 
 if __name__ == "__main__":
-    dfr = pd.read_parquet('racesfrtest.parquet')
+    # dfr = pd.read_parquet('racesfrtest.parquet')
+    df_races_fr = pd.read_parquet("racesfrtest.parquet")
+    df_races_tr = pd.read_parquet("racesTR.parquet")
+        
+    df_races_full = pd.concat([df_races_fr, df_races_tr])
+    
+    # clean up memory
+    del df_races_fr, df_races_tr
+    
+    dfr = df_races_full.sort_values(['Date', 'raceNum', 'Div']).reset_index(drop=True)
+    
     start = time.time()
     df_out = buildRivals(dfr)
     print(time.time()-start)
