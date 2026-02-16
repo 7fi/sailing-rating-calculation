@@ -136,34 +136,57 @@ class Sailor:
             # cut out future races that will be recalculated
             self.races = [r for r in self.races if r['ratingType'] != newRT or r['date'] < resetDate]
         
+    def calculateRaceRivals(self, season, score, otherKeys, otherNames, otherTeams, scoreVals, pos, rivals=None):
+        if rivals is None:
+            rivals = self.rivals
+          
+        for otherKey, otherName, otherTeam, otherScore in zip(otherKeys, otherNames, otherTeams, scoreVals):
+            if otherKey == self.key:
+                continue
+            
+            wonThisRace = (1 if otherScore > score else 0)
+            
+            rival = rivals.setdefault(pos, # try and grab counts for this position, with fallback
+                                            {}).setdefault(
+                otherKey, # try and grab the info about the other sailor, with fallback
+                {
+                    'name': otherName,
+                    'races': {},
+                    'team': otherTeam,
+                    'wins': {}
+                }
+            )
+
+            rival['races'][season] = rival['races'].get(season, 0) + 1
+            rival['wins'][season] = rival['wins'].get(season, 0) + wonThisRace
+    
+    def calculateAllRivals(self, dfr):
+        # position, sailor, stat, season
+        rivals = {}
+        grouped = dfr.groupby(['adjusted_raceID', 'Position'])
         
-    def resetRatingToBeforeSeason(self, season, ratingType):
-        # find the race before this race (assumes races are sorted)
-        seasons = [sub for s in [[f"s{i}",f"f{i}"] for i in range(10,27)] for sub in s]
-        seasonsToRemove = seasons[seasons.index(season) + 1:]
-        
-        raceSeasons = list(map(lambda r: r['raceID'].split("/")[0], self.races))
-        seasonIndex = raceSeasons.index(season)
-        
-        for i in range(seasonIndex, 0, -1):
-            if self.races[i]['ratingType'] == ratingType:
-                # set rating type to rating
-                rating = self.races[i]['newRating']
-                setattr(self, ratingType, rating)
-                break
-        
-        # remove races that will be re-calculated
-        self.races = [r for r in self.races if r['raceID'].split("/")[0] not in seasonsToRemove and r['ratingType'] == ratingType]
-        
-        # TODO: Rivals are cooked here now...
-        
-        # delete all future rivals
-        # for pos in ['skipper', 'crew']:
-        #     for sailor in self.rivals[pos].keys():
-        #             for s in self.rivals[pos][sailor]['races'].keys():
-        #                 if s in seasonsToRemove:
-        #                     self.rivals[pos][sailor]['races'][s] = 0
-        #                     self.rivals[pos][sailor]['wins'][s] = 0
+        for race in self.races:
+            season = race['raceID'].split("/")[0]
+            if race['type'] == 'fleet':
+                score = race['score']
+                
+                key = (race['raceID'], race['pos'])
+
+                if key in grouped.groups:
+                    raceRows = grouped.get_group(key)
+
+                    self.calculateRaceRivals(
+                        season,
+                        score,
+                        raceRows['key'].tolist(),
+                        raceRows['Sailor'].tolist(),
+                        raceRows['Team'].tolist(),
+                        raceRows['Score'].tolist(),
+                        race['pos'],
+                        rivals
+                    )
+            
+        return rivals
         
     def __repr__(self):
         config = Config()
@@ -381,7 +404,6 @@ def uploadSailors(people, connection, config : Config, batch_size=300):
     print(len(eligible))
 
     sailor_rows = []
-    rival_rows = []
     sailor_teams_rows = []
 
     for i, p in enumerate(eligible):
@@ -421,22 +443,6 @@ def uploadSailors(people, connection, config : Config, batch_size=300):
                         'skipper': {season: rc_norm.get(season, {}).get('Skipper', 0) for season in [s[0] for s in list(ps['skipper'])]},
                         'crew': {season: rc_norm.get(season, {}).get('Crew', 0) for season in [s[0] for s in list(ps['crew'])]}
                     })( (lambda rc: {s: {pos.title(): cnt for pos, cnt in posd.items()} for s, posd in rc.items()})(getCounts(p.races)), p.seasons ) 
-
-        for position in ['Skipper', 'Crew']:
-            if position not in p.rivals:
-                continue
-            for key, values in p.rivals[position].items():
-                for season in values['races']:
-                    rival_rows.append((
-                        p.key.replace("/", "-"),
-                        key,
-                        values['name'],
-                        values['team'],
-                        position,
-                        season,
-                        values['races'][season],
-                        values['wins'][season]
-                    ))
                     
         for position in ['skipper', 'crew']:
             if p.key is None:
@@ -482,19 +488,6 @@ def uploadSailors(people, connection, config : Config, batch_size=300):
                         avgCrewRatio = VALUES(avgCrewRatio)
                 """, sailor_rows)
             sailor_rows.clear()
-
-            if rival_rows:
-                with connection.cursor() as cursor:
-                    cursor.executemany("""
-                        INSERT INTO SailorRivals (
-                            sailorID, rivalID, rivalName, rivalTeam, position, season, raceCount, winCount
-                        )
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-                        ON DUPLICATE KEY UPDATE
-                            raceCount = VALUES(raceCount),
-                            winCount = VALUES(winCount)
-                    """, rival_rows)
-                rival_rows.clear()
             
             if sailor_teams_rows:
                 try:
@@ -543,16 +536,7 @@ def uploadSailors(people, connection, config : Config, batch_size=300):
                         avgCrewRatio = VALUES(avgCrewRatio)
                 """, sailor_rows)
             connection.commit()
-        if rival_rows:
-            cursor.executemany("""
-                        INSERT INTO SailorRivals (
-                            sailorID, rivalID, rivalName, rivalTeam, position, season, raceCount, winCount
-                        )
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-                        ON DUPLICATE KEY UPDATE
-                            raceCount = VALUES(raceCount),
-                            winCount = VALUES(winCount)
-                    """, rival_rows)
+
         if sailor_teams_rows:
             cursor.executemany("""
                     INSERT INTO SailorTeams(sailorID, teamID, season, position, raceCount)

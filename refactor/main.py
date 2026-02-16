@@ -5,6 +5,8 @@ from dataScraper import runSailorData
 from calculationsFR import calculateFR
 from calculationsTR import calculateTR
 
+from chatRivals import buildRivals, uploadRivals
+
 from uploadScores import uploadScoresBySailor
 from Teams import uploadTeams
 
@@ -176,7 +178,7 @@ def calculateAllRaces(people, df_races, regatta_info, calculatedAtDict: dict, co
     
     return people, allFrRaces, allTrRaces
 
-def upload(people : dict[str, Sailor], config: Config):
+def upload(people : dict[str, Sailor], df_rivals, config: Config):
     # Create a connection
     connection = mysql.connector.connect(
         host=os.getenv('DB_HOST'),
@@ -189,6 +191,7 @@ def upload(people : dict[str, Sailor], config: Config):
     uploadSailors(people, connection, config)
     uploadTeams(people, connection, config)
     uploadScoresBySailor(people, connection)
+    uploadRivals(df_rivals, connection)
     
     connection.close()
     
@@ -243,6 +246,7 @@ def main(rootDir : str = "", jupyter = False):
     people, allFrRaces, allTrRaces = calculateAllRaces(people, df_races_full, regatta_info, calculatedAtDict, config)
     people = calculateSailorRanks(people, config)
     updateSailorRatios(people)
+    df_rivals = buildRivals(df_races_full)
     
     print("Calculations finished.\nOutputting to files")
     
@@ -261,7 +265,7 @@ def main(rootDir : str = "", jupyter = False):
     
     if config.doUpload:
         print("Uploading to db")
-        upload(people, config)
+        upload(people, df_rivals, config)
 
 if __name__ == "__main__":
     # with cProfile.Profile() as profile:
