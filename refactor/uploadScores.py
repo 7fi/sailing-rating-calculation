@@ -1,4 +1,19 @@
 from Sailors import Sailor
+
+def updateHomepageStats(connection):
+    # Update homepage stats
+    with connection.cursor() as cursor:
+        cursor.execute("""
+            UPDATE HomePageStats SET 
+                numSailors = (SELECT COUNT(*) FROM Sailors),
+                numScores = (SELECT COUNT(*) FROM FleetScores) + (SELECT COUNT(*) FROM TRScores),
+                numTeams = (SELECT COUNT(*) FROM Teams)
+            WHERE id = 1;
+        """)
+        
+    connection.commit()
+
+
 def uploadScoresBySailor(people : dict[str,Sailor], connection, batch_size=10000):
     fleet_rows = []
     team_rows = []
@@ -92,16 +107,38 @@ def uploadScoresBySailor(people : dict[str,Sailor], connection, batch_size=10000
     print("Inserting TRScores...")
     batch_insert("TRScores", team_columns, team_rows)
     
-    # Update homepage stats
-    with connection.cursor() as cursor:
-        cursor.execute("""
-            UPDATE HomePageStats SET 
-                numSailors = (SELECT COUNT(*) FROM Sailors),
-                numScores = (SELECT COUNT(*) FROM FleetScores) + (SELECT COUNT(*) FROM TRScores),
-                numTeams = (SELECT COUNT(*) FROM Teams)
-            WHERE id = 1;
-        """)
-        
-    connection.commit()
+    updateHomepageStats(connection)
     # cursor.close()
     print("Upload complete.")
+
+def batch_insert(table_name, columns, data, connection, batch_size=10_000):
+    for start in range(0, len(data), batch_size):
+        print("Inserting", start, "/", len(data))
+        batch = data[start:start + batch_size]
+        placeholders = ",".join(["%s"] * len(columns))
+        updates = ",".join([f"{col} = VALUES({col})" for col in columns])
+        sql = f"""INSERT INTO {table_name} ({','.join(columns)}) VALUES ({placeholders})
+            ON DUPLICATE KEY UPDATE
+                {updates}
+            WHERE lastUpdated < VALUES(calculatedAt)"""
+        with connection.cursor() as cursor:
+            cursor.executemany(sql, batch)
+    connection.commit()
+
+def uploadAllScores(allFrRows, allTrRows, connection, batch_size=10_000):
+    
+    fleet_columns = [
+        'season', 'regatta', 'raceNumber', 'division', 'sailorID', 'partnerID', 'partnerName',
+        'score', 'predicted', 'ratio', 'penalty', 'position', 'date', 'scoring', 'venue',
+        'boat','boatName', 'ratingType', 'oldRating', 'newRating', 'regAvg'
+    ]
+    team_columns = [
+        'season', 'regatta', 'raceNumber', 'round', 'sailorID', 'partnerID', 'partnerName',
+        'opponentTeam', 'opponentNick', 'score', 'outcome', 'predicted', 'penalty', 'position',
+        'date', 'venue', 'boat', 'boatName', 'ratingType', 'oldRating', 'newRating', 'regAvg'
+    ]
+    
+    batch_insert("FleetScores", fleet_columns, allFrRows, connection, batch_size)
+    batch_insert("TRScores", team_columns, allTrRows, connection, batch_size)
+        
+    updateHomepageStats(connection)

@@ -5,6 +5,7 @@ import time
 from config import Config
 
 def buildRivals(dfr: pd.DataFrame, config: Config):
+    print("Calculating Rivals")
 
     # Split fleet and team races
     dfr["season"] = dfr["adjusted_raceID"].str.split("/").str[0]
@@ -194,6 +195,7 @@ def buildRivals(dfr: pd.DataFrame, config: Config):
     return df_out
 
 def uploadRivals(df_rivals, connection, batch_size=10_000):
+    print("Uploading Rivals")
     rival_rows = list(df_rivals.itertuples(index=False, name=None))
     
     with connection.cursor() as cursor:

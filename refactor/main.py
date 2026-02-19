@@ -7,7 +7,7 @@ from calculationsTR import calculateTR
 
 from chatRivals import buildRivals, uploadRivals
 
-from uploadScores import uploadScoresBySailor
+from uploadScores import uploadScoresBySailor, uploadAllScores
 from Teams import uploadTeams
 
 from Sailors import Sailor, setupPeople, handleMerges, outputSailorsToFile, calculateSailorRanks, uploadSailors, updateSailorRatios
@@ -178,7 +178,7 @@ def calculateAllRaces(people, df_races, regatta_info, calculatedAtDict: dict, co
     
     return people, allFrRaces, allTrRaces
 
-def upload(people : dict[str, Sailor], df_rivals, config: Config):
+def upload(people : dict[str, Sailor], allFrRows, allTrRows, df_rivals, config: Config):
     # Create a connection
     connection = mysql.connector.connect(
         host=os.getenv('DB_HOST'),
@@ -190,7 +190,7 @@ def upload(people : dict[str, Sailor], df_rivals, config: Config):
 
     uploadSailors(people, connection, config)
     uploadTeams(people, connection, config)
-    uploadScoresBySailor(people, connection)
+    uploadAllScores(allFrRows, allTrRows, connection)
     uploadRivals(df_rivals, connection)
     
     connection.close()
@@ -226,14 +226,18 @@ def load(rootDir : str, config: Config):
             calculatedAtDict = json.load(f)
     except FileNotFoundError:
         calculatedAtDict = {}
+        
+        
+    df_oldFrPostCalcRaces = pd.read_parquet(rootDir + 'postcalcfrraces.parquet')
+    df_oldTrPostCalcRaces = pd.read_parquet(rootDir + 'postcalctrraces.parquet')
     
-    return df_races_full, df_sailor_info, df_sailor_ratings, calculatedAtDict
+    return df_races_full, df_sailor_info, df_sailor_ratings, calculatedAtDict, df_oldFrPostCalcRaces, df_oldTrPostCalcRaces
 
 def main(rootDir : str = "", jupyter = False):
     
     config : Config = Config()
 
-    df_races_full, df_sailor_info, df_sailor_ratings, calculatedAtDict = load(rootDir, config)
+    df_races_full, df_sailor_info, df_sailor_ratings, calculatedAtDict, df_oldFrPostCalcRaces, df_oldTrPostCalcRaces = load(rootDir, config)
 
     print("Loading complete.\nStarting setup.")
 
@@ -246,7 +250,15 @@ def main(rootDir : str = "", jupyter = False):
     people, allFrRaces, allTrRaces = calculateAllRaces(people, df_races_full, regatta_info, calculatedAtDict, config)
     people = calculateSailorRanks(people, config)
     updateSailorRatios(people)
-    df_rivals = buildRivals(df_races_full)
+    df_rivals = buildRivals(df_races_full, config)
+    
+    existing_race_ids = set(race.get('raceID') for race in allFrRaces)
+    new_rows = df_oldFrPostCalcRaces[~df_oldFrPostCalcRaces['raceID'].isin(existing_race_ids)]
+    allFrRaces.extend(new_rows.to_dict('records'))
+    
+    existing_race_ids = set(race.get('raceID') for race in allTrRaces)
+    new_rows = df_oldTrPostCalcRaces[~df_oldTrPostCalcRaces['raceID'].isin(existing_race_ids)]
+    allTrRaces.extend(new_rows.to_dict('records'))
     
     print("Calculations finished.\nOutputting to files")
     
@@ -261,7 +273,10 @@ def main(rootDir : str = "", jupyter = False):
     df_rivals.to_parquet('rivalstesting.parquet')
     
     df_frAfter = pd.DataFrame(allFrRaces)
-    df_frAfter.to_parquet("postcalcfrraces.parquet")
+    df_frAfter.to_parquet("postcalcFRraces.parquet")
+    
+    df_trAfter = pd.DataFrame(allTrRaces)
+    df_trAfter.to_parquet("postcalcTRraces.parquet")
     
     print("File output finished.")
     
