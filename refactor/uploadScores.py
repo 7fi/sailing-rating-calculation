@@ -117,10 +117,11 @@ def batch_insert(table_name, columns, data, connection, batch_size=10_000):
         batch = data[start:start + batch_size]
         placeholders = ",".join(["%s"] * len(columns))
         updates = ",".join([f"{col} = VALUES({col})" for col in columns])
-        sql = f"""INSERT INTO {table_name} ({','.join(columns)}) VALUES ({placeholders})
-            ON DUPLICATE KEY UPDATE
-                {updates}
-            WHERE lastUpdated < VALUES(calculatedAt)"""
+        sql = f"""INSERT INTO {table_name} 
+                  ({','.join(columns)}) 
+                  VALUES ({placeholders})
+                  ON DUPLICATE KEY UPDATE {updates}
+                  WHERE lastUpdated < VALUES(calculatedAt)"""
         with connection.cursor() as cursor:
             cursor.executemany(sql, batch)
     connection.commit()

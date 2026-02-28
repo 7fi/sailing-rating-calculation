@@ -200,7 +200,7 @@ def load(rootDir : str, config: Config):
     
     if config.doScrape:
         df_races_fr = runFleetScrape("racesfrtest.parquet", "racesfrtest.parquet") 
-        df_races_tr = scrapeTR("racesTR.json","racesTR.json", "trSailorInfoAll.json")
+        df_races_tr = scrapeTR("racesTR.json", "racesTR.json", "trSailorInfoAll.json")
         df_sailor_info = runSailorData("racesfrtest.parquet", "trSailorInfoAll.json", "sailor_data2.parquet", "sailor_data2.parquet")
     else: 
         print("Reading from files.")
@@ -282,7 +282,7 @@ def main(rootDir : str = "", jupyter = False):
     
     if config.doUpload:
         print("Uploading to db")
-        upload(people, df_rivals, config)
+        upload(people, allFrRaces, allTrRaces, df_rivals, config)
 
 if __name__ == "__main__":
     # with cProfile.Profile() as profile:

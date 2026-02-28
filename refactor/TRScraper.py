@@ -404,8 +404,8 @@ def scrapeTR(infile, outfile, outInfoFile):
   df_totalSailors2 = df_totalSailors2.reset_index(drop=True)
   df_totalSailors2.to_json(outInfoFile, index=False)
 
-  df_final.to_json(f"TR-{date.today().strftime("%Y%m%d")}.json", index=False,date_format='iso')
-  df_final.to_json(outfile, index=False,date_format='iso')
+  df_final.to_parquet(f"TR-{date.today().strftime("%Y%m%d")}.json", index=False,date_format='iso')
+  df_final.to_parquet(outfile, index=False,date_format='iso')
   
   return df_final
 

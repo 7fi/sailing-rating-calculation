@@ -18,7 +18,7 @@ class Sailor:
     links : str
     teams : list[str]
 
-    seasons : dict[str, list[dict]]
+    seasons : dict[str, list[tuple[str, str]]]
     races : list[dict]
     rivals : dict
     
@@ -147,7 +147,7 @@ class Sailor:
             wonThisRace = (1 if otherScore > score else 0)
             
             rival = rivals.setdefault(pos, # try and grab counts for this position, with fallback
-                                            {}).setdefault(
+                {}).setdefault(
                 otherKey, # try and grab the info about the other sailor, with fallback
                 {
                     'name': otherName,
@@ -210,7 +210,12 @@ def make_sailor(config, args):
     )
 
 def createSailor(sd):
-    return Sailor(sd['Sailor'], sd['key'], sd['gender'], sd['GradYear'], sd['Links'], sd['Teams'], sd['Seasons'], sd['Races'], sd['Rivals'],     
+    newSeasons = {'skipper': [], 'crew': []}
+    for pos in ['skipper', 'crew']:
+        for entry in sd['Seasons'][pos]:
+            newSeasons[pos].append((entry[0], entry[1]))
+            
+    return Sailor(sd['Sailor'], sd['key'], sd['gender'], sd['GradYear'], sd['Links'], sd['Teams'], newSeasons, sd['Races'], sd['Rivals'],     
             PlackettLuceRating(sd['srMU'], sd['srSigma']),
             PlackettLuceRating(sd['crMU'], sd['crSigma']),
             PlackettLuceRating(sd['wsrMU'], sd['wsrSigma']),
@@ -373,9 +378,9 @@ def calculateSailorRanks(people : dict[str,Sailor], config : Config):
 def updateSailorRatios(people: dict[str, Sailor]):
     for key, p in people.items():
         avgSkipperRatio = float(np.array(
-            [r['ratio'] for r in p.races if r['pos'] == 'Skipper' and 'ratio' in r.keys()]).mean())
+            [r['ratio'] for r in p.races if r['pos'].lower() == 'skipper' and 'ratio' in r.keys()]).mean())
         avgCrewRatio = float(np.array(
-            [r['ratio'] for r in p.races if r['pos'] == 'Crew' and 'ratio' in r.keys()]).mean())
+            [r['ratio'] for r in p.races if r['pos'].lower() == 'crew' and 'ratio' in r.keys()]).mean())
         p.avgSkipperRatio = avgSkipperRatio
         p.avgCrewRatio = avgCrewRatio
 
@@ -447,14 +452,18 @@ def uploadSailors(people, connection, config : Config, batch_size=300):
         for position in ['skipper', 'crew']:
             if p.key is None:
                 continue
-            for season, team in set(p.seasons[position]):
-                sailor_teams_rows.append((
-                    p.key.replace("/", "-"),
-                    team,
-                    season,
-                    position,
-                    raceCounts[position][season]
-                ))
+            try:
+                for season, team in set(p.seasons[position]):
+                    sailor_teams_rows.append((
+                        p.key.replace("/", "-"),
+                        team,
+                        season,
+                        position,
+                        raceCounts[position][season]
+                    ))
+            except Exception as e:
+                print(position, p.seasons, p.seasons[position])
+                raise e
 
         # Commit in batches
         if (i + 1) % batch_size == 0:
