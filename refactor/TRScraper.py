@@ -6,94 +6,6 @@ from datetime import date
 from datetime import date, datetime
 import os
 
-def setup(infile):
-  # seasons = ['f24', 's24', 'f23', 's23', 'f22','s22']
-  # seasons = ['f24', 's24', 'f23', 's23', 'f22','s22']
-  seasons = [[f"f{i}",f"s{i}"] for i in range (16,27)]
-  seasons = [sub for s in seasons for sub in s]
-  # seasons = ['s24']
-
-  df_old = pd.DataFrame()
-  try:
-    df_old = pd.read_json(infile)
-  except:
-    df_old = pd.DataFrame(columns=['raceID', 'adjusted_raceID', 'Regatta', 'raceNum', 'Date', 'Venue', 'Scoring', 'allSkipperKeys', 'allCrewKeys', 'teamAName', 'teamAUni', 'teamANick', 'teamALink', 'teamAID', 'teamABoats', 'teamAScore', 'teamAOutcome', 'teamBName', 'teamBUni', 'teamBNick', 'teamBLink', 'teamBID', 'teamBBoats', 'teamBScore', 'teamBOutcome'])
-
-  regattas = {}
-
-  for season in seasons:
-    url = f"https://scores.collegesailing.org/{season}/"
-    page = requests.get(url)
-    listSoup = BeautifulSoup(page.content, 'html.parser')
-    
-    try:
-        tbody = listSoup.find('table', class_="season-summary").find('tbody')
-    except Exception as e:
-        print(e)
-        continue
-    
-    for link in tbody.find_all("a", href=True):
-      scoring = link.parent.next_sibling.next_sibling.next_sibling.text
-      regatta_date = link.parent.next_sibling.next_sibling.next_sibling.next_sibling.text
-      regatta_status = link.parent.next_sibling.next_sibling.next_sibling.next_sibling.next_sibling.text
-      
-      rescrape = regatta_status != 'Official'
-      if (datetime.today() - datetime.strptime(regatta_date, "%m/%d/%Y")).days > 14:
-          rescrape = False
-      if rescrape:
-          print(link['href'], regatta_date)
-          
-      scrape = (season + "/" + link['href']) not in df_old['Regatta'].unique() or rescrape
-      if (scoring == "Team") and scrape:
-          regattas[season + "/" + link['href']] = {"link":season + "/" + link['href'], "scoring": scoring, 'rescrape': rescrape}
-  print(len(regattas))
-
-  regattaSoups = {}
-
-  for i, regatta in enumerate(list(regattas.values())):
-      link = regatta['link']
-      rescrape = regatta['rescrape']
-      
-      allRaces = sailors = report = None
-      regattaID = list(regattas.keys())[i]
-      
-      if not os.path.exists(f"pagesTR/{link.split("/")[0]}"):
-          os.makedirs(f"pagesTR/{link.split("/")[0]}")
-      if os.path.exists(f"pagesTR/{link}-allraces.html") and os.path.exists(f"pagesTR/{link}-sailors.html") and os.path.exists(f"pagesTR/{link}-report.html") and not rescrape:
-          if i % 50 == 0:
-              print(f"({i + 1}/{len(list(regattas.values()))}) getting soup from file for {regattaID}")
-          with open(f"pagesTR/{link}-allraces.html", "r") as f:
-              allRaces = BeautifulSoup(f.read(), 'html.parser')
-          with open(f"pagesTR/{link}-sailors.html", "r") as f:
-              sailors = BeautifulSoup(f.read(), 'html.parser')
-          with open(f"pagesTR/{link}-report.html", "r") as f:
-              report = BeautifulSoup(f.read(), 'html.parser')
-      else:
-          print(f"({i + 1}/{len(list(regattas.values()))}) getting soup for {regattaID}")
-          # all races
-          url = f"https://scores.collegesailing.org/{regatta['link']}/all/"
-          page = requests.get(url)
-          with open(f"pagesTR/{link}-allraces.html", "w") as f:
-                          f.write(str(page.content))
-          allRaces = BeautifulSoup(page.content, 'html.parser')
-
-          # sailors
-          url = f"https://scores.collegesailing.org/{regatta['link']}/sailors/"
-          page = requests.get(url)
-          with open(f"pagesTR/{link}-sailors.html", "w") as f:
-                          f.write(str(page.content))
-          sailors = BeautifulSoup(page.content, 'html.parser')
-          
-          url = f"https://scores.collegesailing.org/{regatta['link']}/"
-          page = requests.get(url)
-          with open(f"pagesTR/{link}-report.html", "w") as f:
-                          f.write(str(page.content))
-          report = BeautifulSoup(page.content, 'html.parser')
-      
-      regattaSoups[regattaID] = {"allRaces": allRaces, "sailors": sailors, 'report': report, "scoring": regatta['scoring']}
-      
-  return regattaSoups, df_old, regattas
-    
 def makeRaceList(raceRows):
   raceList = []
   round = ''
@@ -390,6 +302,93 @@ def getData(regattaSoups, regattas):
                       })
   return data, totalSailors
     
+
+def setup(infile):
+  seasons = [[f"f{i}",f"s{i}"] for i in range (16,27)]
+  seasons = [sub for s in seasons for sub in s]
+
+  df_old = pd.DataFrame()
+  try:
+    df_old = pd.read_parquet(infile)
+  except:
+     df_old = pd.DataFrame(columns=['raceID', 'adjusted_raceID', 'Regatta', 'raceNum', 'Date', 'Venue', 'Scoring', 'allSkipperKeys', 'allCrewKeys', 'teamAName', 'teamAUni', 'teamANick', 'teamALink', 'teamAID', 'teamABoats', 'teamAScore', 'teamAOutcome', 'teamBName', 'teamBUni', 'teamBNick', 'teamBLink', 'teamBID', 'teamBBoats', 'teamBScore', 'teamBOutcome'])
+
+  regattas = {}
+
+  for season in seasons:
+    url = f"https://scores.collegesailing.org/{season}/"
+    page = requests.get(url)
+    listSoup = BeautifulSoup(page.content, 'html.parser')
+    
+    try:
+        tbody = listSoup.find('table', class_="season-summary").find('tbody')
+    except Exception as e:
+        print(e)
+        continue
+    
+    for link in tbody.find_all("a", href=True):
+      scoring = link.parent.next_sibling.next_sibling.next_sibling.text
+      regatta_date = link.parent.next_sibling.next_sibling.next_sibling.next_sibling.text
+      regatta_status = link.parent.next_sibling.next_sibling.next_sibling.next_sibling.next_sibling.text
+      
+      rescrape = regatta_status != 'Official'
+      if (datetime.today() - datetime.strptime(regatta_date, "%m/%d/%Y")).days > 14:
+          rescrape = False
+      if rescrape:
+          print(link['href'], regatta_date)
+          
+      scrape = (season + "/" + link['href']) not in df_old['Regatta'].unique() or rescrape
+      if (scoring == "Team") and scrape:
+          regattas[season + "/" + link['href']] = {"link":season + "/" + link['href'], "scoring": scoring, 'rescrape': rescrape}
+  print(len(regattas))
+
+  regattaSoups = {}
+
+  for i, regatta in enumerate(list(regattas.values())):
+      link = regatta['link']
+      rescrape = regatta['rescrape']
+      
+      allRaces = sailors = report = None
+      regattaID = list(regattas.keys())[i]
+      
+      if not os.path.exists(f"pagesTR/{link.split("/")[0]}"):
+          os.makedirs(f"pagesTR/{link.split("/")[0]}")
+      if os.path.exists(f"pagesTR/{link}-allraces.html") and os.path.exists(f"pagesTR/{link}-sailors.html") and os.path.exists(f"pagesTR/{link}-report.html") and not rescrape:
+          if i % 50 == 0:
+              print(f"({i + 1}/{len(list(regattas.values()))}) getting soup from file for {regattaID}")
+          with open(f"pagesTR/{link}-allraces.html", "r") as f:
+              allRaces = BeautifulSoup(f.read(), 'html.parser')
+          with open(f"pagesTR/{link}-sailors.html", "r") as f:
+              sailors = BeautifulSoup(f.read(), 'html.parser')
+          with open(f"pagesTR/{link}-report.html", "r") as f:
+              report = BeautifulSoup(f.read(), 'html.parser')
+      else:
+          print(f"({i + 1}/{len(list(regattas.values()))}) getting soup for {regattaID}")
+          # all races
+          url = f"https://scores.collegesailing.org/{regatta['link']}/all/"
+          page = requests.get(url)
+          with open(f"pagesTR/{link}-allraces.html", "w") as f:
+                          f.write(str(page.content))
+          allRaces = BeautifulSoup(page.content, 'html.parser')
+
+          # sailors
+          url = f"https://scores.collegesailing.org/{regatta['link']}/sailors/"
+          page = requests.get(url)
+          with open(f"pagesTR/{link}-sailors.html", "w") as f:
+                          f.write(str(page.content))
+          sailors = BeautifulSoup(page.content, 'html.parser')
+          
+          url = f"https://scores.collegesailing.org/{regatta['link']}/"
+          page = requests.get(url)
+          with open(f"pagesTR/{link}-report.html", "w") as f:
+                          f.write(str(page.content))
+          report = BeautifulSoup(page.content, 'html.parser')
+      
+      regattaSoups[regattaID] = {"allRaces": allRaces, "sailors": sailors, 'report': report, "scoring": regatta['scoring']}
+      
+  return regattaSoups, df_old, regattas
+        
+
 def scrapeTR(infile, outfile, outInfoFile):    
   print("Scraping TR")
   regattaSoups, df_old, regattas = setup(infile)
@@ -404,10 +403,11 @@ def scrapeTR(infile, outfile, outInfoFile):
   df_totalSailors2 = df_totalSailors2.reset_index(drop=True)
   df_totalSailors2.to_json(outInfoFile, index=False)
 
-  df_final.to_parquet(f"TR-{date.today().strftime("%Y%m%d")}.json", index=False,date_format='iso')
-  df_final.to_parquet(outfile, index=False,date_format='iso')
+  df_final.to_parquet(f"TR-{date.today().strftime("%Y%m%d")}.parquet", index=False)
+  df_final.to_parquet(outfile, index=False)
   
   return df_final
 
+
 if __name__ == "__main__":
-    scrapeTR()
+    scrapeTR("racesTR.parquet", "racesTR.parquet", "trSailorInfoAll.json")

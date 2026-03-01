@@ -121,6 +121,8 @@ class Sailor:
         if ratingType not in self.ratingTypesReset:
             self.ratingTypesReset.append(ratingType)
         
+        resetDate = resetDate.timestamp()
+        
         for pos in ['s', 'c']:
             newRT = 'w' if 'w' in ratingType else '' + 't' if 't' in ratingType else '' + pos + 'r'
             racesBeforeReset = [r for r in self.races if r['date'] < resetDate and r['ratingType'] == newRT]
