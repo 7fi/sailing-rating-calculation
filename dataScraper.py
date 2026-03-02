@@ -108,7 +108,7 @@ async def main(links):
 
 def runSailorData():
     print("Scraping sailor data")
-    df_races = pd.read_json("racesfr.json")
+    df_races = pd.read_parquet("racesfrtest.parquet")
     trPeople = pd.read_json("trSailorInfoAll.json")
     # old = pd.DataFrame()
     old = pd.read_json("sailor_data2.json")

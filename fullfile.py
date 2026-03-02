@@ -1421,13 +1421,13 @@ if __name__ == "__main__":
 
     doScrape = False
     doCalc = True
-    doUpload = True
+    doUpload = False
 
     if doScrape:
         df_races = runFleetScrape()
     else:
         # if running scrapers seperately
-        df_races = pd.read_json("racesfr.json")
+        df_races = pd.read_parquet("racesfrtest.parquet")
 
     df_races['raceNum'] = df_races['raceID'].apply(
         lambda id: int(id.split("/")[2][:-1]))  # Numeric part
@@ -1471,7 +1471,7 @@ if __name__ == "__main__":
     if not calc_all:
         cutoff = (datetime.now() - timedelta(weeks=2))
         df_races_full = df_races_full.loc[df_races_full['date'] > cutoff]
-        df_sailor_ratings = pd.read_json("sailors-latest.json")      
+        df_sailor_ratings = pd.read_json("sailors-latest.json")
         # df_sailor_ratings = pd.read_json("sailors-20250424.json")
 
     if doScrape:
