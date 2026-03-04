@@ -112,43 +112,43 @@ def makeSailorList(sailorData, regatta):
           for race, opponent, opponentFull, oppID in zip(sailorTables, tempNames, tempFullNames, tempTeamIDs):
               boats = [list(names.stripped_strings) for names in race.find_all('td')][:3]
               for boat in boats:
-                  skipperName, skipperYear, crewName, crewYear = ['Unknown'] * 4
+                skipperName, skipperYear, crewName, crewYear = ['Unknown'] * 4
                   
-                  if len(boat) == 2:
-                      if boat[0] != 'No show':
-                          skipperName = boat[0].split(" '")[0].strip()
-                          skipperYear = boat[0].split(" '")[1].strip()
-                      if boat[1] != 'No show':
-                          crewName = boat[1].split(" '")[0].strip()
-                          crewYear = boat[1].split(" '")[1].strip()
-                      
-                  sailorRaceList.append({'name': skipperName,
-                                          'year': skipperYear,
-                                          'pos': 'skipper',
-                                          'round': round,
-                                          'teamName': teamName, 
-                                          'teamID': teamID,
-                                          'fullName': fullTeamName, 
-                                          'opponent': opponent,
-                                          'opponentFull': opponentFull,
-                                          'oppID': oppID,
-                                          'partner': crewName,
-                                          'Regatta': regatta
-                                          })
-                  
-                  sailorRaceList.append({'name': crewName,
-                                          'year': crewYear,
-                                          'pos': 'crew',
-                                          'round': round,
-                                          'teamName': teamName, 
-                                          'teamID': teamID,
-                                          'fullName': fullTeamName, 
-                                          'opponent': opponent,
-                                          'opponentFull': opponentFull,
-                                          'oppID': oppID,
-                                          'partner': skipperName,
-                                          'Regatta': regatta
-                                          })
+                if len(boat) == 2:
+                    if boat[0] != 'No show':
+                        skipperName = boat[0].split(" '")[0].strip()
+                        skipperYear = boat[0].split(" '")[1].strip()
+                    if boat[1] != 'No show':
+                        crewName = boat[1].split(" '")[0].strip()
+                        crewYear = boat[1].split(" '")[1].strip()
+
+                sailorRaceList.append({'name': skipperName,
+                                        'year': skipperYear,
+                                        'pos': 'skipper',
+                                        'round': round,
+                                        'teamName': teamName, 
+                                        'teamID': teamID,
+                                        'fullName': fullTeamName, 
+                                        'opponent': opponent,
+                                        'opponentFull': opponentFull,
+                                        'oppID': oppID,
+                                        'partner': crewName,
+                                        'Regatta': regatta
+                                        })
+                
+                sailorRaceList.append({'name': crewName,
+                                        'year': crewYear,
+                                        'pos': 'crew',
+                                        'round': round,
+                                        'teamName': teamName, 
+                                        'teamID': teamID,
+                                        'fullName': fullTeamName, 
+                                        'opponent': opponent,
+                                        'opponentFull': opponentFull,
+                                        'oppID': oppID,
+                                        'partner': skipperName,
+                                        'Regatta': regatta
+                                        })
                     
   return sailorRaceList
 
@@ -222,12 +222,12 @@ def getData(regattaSoups, regattas):
           round = race_result['round']
           
           teamA = race_result['teamA']
-          teamAID = df_teamReportInfo.loc[df_teamReportInfo['uniName'] == teamA['name'], 'teamID'].iat[0]
+          teamAID = df_teamReportInfo.loc[(df_teamReportInfo['uniName'] == teamA['name']) & (df_teamReportInfo['teamNick'] == teamA['nick']), 'teamID'].iat[0]
           # print(teamAID,df_sailorteamInfo)
           teamAName = df_sailorteamInfo.loc[df_sailorteamInfo['teamID'] == teamAID, 'teamName'].iat[0]
           
           teamB = race_result['teamB']
-          teamBID = df_teamReportInfo.loc[df_teamReportInfo['uniName'] == teamB['name'], 'teamID'].iat[0]
+          teamBID = df_teamReportInfo.loc[(df_teamReportInfo['uniName'] == teamB['name']) & (df_teamReportInfo['teamNick'] == teamB['nick']), 'teamID'].iat[0]
           teamBName = df_sailorteamInfo.loc[df_sailorteamInfo['teamID'] == teamBID, 'teamName'].iat[0]
 
           allSkipperKeys = []
@@ -341,6 +341,8 @@ def setup(infile):
       if (scoring == "Team") and scrape:
           regattas[season + "/" + link['href']] = {"link":season + "/" + link['href'], "scoring": scoring, 'rescrape': rescrape}
   print(len(regattas))
+  
+#   regattas = {'s26/harvard-women-team-race': {"link": 's26/harvard-women-team-race', "scoring": 'team', 'rescrape': True}}
 
   regattaSoups = {}
 
@@ -404,10 +406,10 @@ def scrapeTR(infile, outfile, outInfoFile):
   df_totalSailors2.to_json(outInfoFile, index=False)
 
   df_final.to_parquet(f"TR-{date.today().strftime("%Y%m%d")}.parquet", index=False)
-  df_final.to_parquet(outfile, index=False)
+  df_final.to_json(outfile, index=False)
   
   return df_final
 
 
 if __name__ == "__main__":
-    scrapeTR("racesTR.parquet", "racesTR.parquet", "trSailorInfoAll.json")
+    scrapeTR("racesTR.parquet", "racesTR.json", "trSailorInfoAll.json")
