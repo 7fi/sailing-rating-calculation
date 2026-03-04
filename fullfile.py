@@ -173,7 +173,6 @@ def validPerson(p, type):
             # and sum([p['raceCount'][seas] for seas in targetSeasons if seas in p['raceCount'].keys()]) > 5
             )
 
-
 def getTeamRatings(people, team, targetSeasons):
     filtered_people = [p for p in people.values() if team in p.teams]
     current = [p for p in filtered_people if not set(p.seasons['skipper']).isdisjoint(
@@ -939,13 +938,13 @@ def uploadSailors(people):
 
     eligible = [p for p in people.values() if (targetSeasons[-1] in p.seasons['skipper']
                                                or targetSeasons[-1] in p.seasons['crew'])
-                and len(p.races) > 0
-                and type(p.races[-1]['date']) != type("hi")]
-                # and (today - p.races[-1]['date']).days < 14]
+                                                and len(p.races) > 0
+                                                and type(p.races[-1]['date']) != type("hi")]
+                                                # and (today - p.races[-1]['date']).days < 14]
 
     # eligible = [p for p in people.values() if 'team' in [r['type'] for r in p.races]]
 
-    # eligible = [people['oliver-dietter']]
+    # eligible = [people['elliott-chalcraft']]
     print(len(eligible))
 
     # Iterate over the people values
@@ -1064,8 +1063,7 @@ def uploadTeams(df_sailors):
         subset=['Team', 'Teamlink']).drop_duplicates(subset='Team', keep='first')
 
     # Create a dictionary with 'Team' as the key and 'TeamLink' as the value
-    team_link_map = pd.Series(
-        df_cleaned.Teamlink.values, index=df_cleaned.Team).to_dict()
+    team_link_map = pd.Series(df_cleaned.Teamlink.values, index=df_cleaned.Team).to_dict()
 
     # Optional: Loop for printing (if necessary)
     for i, (team, row) in enumerate(team_stats.iterrows()):
@@ -1076,18 +1074,18 @@ def uploadTeams(df_sailors):
         avgRatio = row['avgRatio']
         numCurMembers = row['numCurMembers']
 
-    # for i,team in enumerate(teamNames):
-    #     print(f"{i}/{lenteams} {team}")
-    #     temp = df_sailors.loc[(df_sailors['Teams'].apply(lambda x: team in x)) & (df_sailors['Seasons'].apply(lambda x: 'f24' in x['skipper'] or 'f24' in x['crew']))]
-    #     avg = (temp.loc[df_sailors['Seasons'].apply(lambda x: 'f24' in x['skipper']), 'SkipperOrdinal'].mean() + temp.loc[df_sailors['Seasons'].apply(lambda x: 'f24' in x['crew']), 'CrewOrdinal'].mean()) / 2
-    #     avgRatio = (temp.loc[df_sailors['Seasons'].apply(lambda x: 'f24' in x['crew']),'skipperAvgRatio'].mean() + temp.loc[df_sailors['Seasons'].apply(lambda x: 'f24' in x['crew']),'crewAvgRatio'].mean()) / 2
-    #     numCurMembers = len(temp)
+        # for i,team in enumerate(teamNames):
+        #     print(f"{i}/{lenteams} {team}")
+        #     temp = df_sailors.loc[(df_sailors['Teams'].apply(lambda x: team in x)) & (df_sailors['Seasons'].apply(lambda x: 'f24' in x['skipper'] or 'f24' in x['crew']))]
+        #     avg = (temp.loc[df_sailors['Seasons'].apply(lambda x: 'f24' in x['skipper']), 'SkipperOrdinal'].mean() + temp.loc[df_sailors['Seasons'].apply(lambda x: 'f24' in x['crew']), 'CrewOrdinal'].mean()) / 2
+        #     avgRatio = (temp.loc[df_sailors['Seasons'].apply(lambda x: 'f24' in x['crew']),'skipperAvgRatio'].mean() + temp.loc[df_sailors['Seasons'].apply(lambda x: 'f24' in x['crew']),'crewAvgRatio'].mean()) / 2
+        #     numCurMembers = len(temp)
 
         region = teamRegions[team]
         # teamLink = df_races.loc[df_races['Team'] == team, 'Teamlink'].iloc[0]
         # Default to '' if team not found
         teamLink = team_link_map.get(team, '')
-        url = f"https://scores.collegesailing.org/schools/{teamLink.split("/")[2]}"
+        url = f"https://scores.collegesailing.org/schools/{teamLink}"
 
         if scrape:
             page = requests.get(url)
@@ -1421,7 +1419,7 @@ if __name__ == "__main__":
 
     doScrape = False
     doCalc = True
-    doUpload = False
+    doUpload = True
 
     if doScrape:
         df_races = runFleetScrape()
@@ -1457,6 +1455,8 @@ if __name__ == "__main__":
 
     df_races_tr['adjusted_raceID'] = df_races_tr['raceID']
     df_races_tr['Scoring'] = 'team'
+    df_races_tr = df_races_tr.rename(
+        {'Date': 'date', 'Regatta': 'regatta'}, axis='columns')
     df_races = df_races.rename(
         {'Date': 'date', 'Regatta': 'regatta'}, axis='columns')
     df_races_full = pd.concat([df_races, df_races_tr])
