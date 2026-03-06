@@ -122,7 +122,7 @@ def updateRaces(newRaces, scores, racers : list[Sailor], scoreVals, predictions,
             'season': actualID.split("/")[0],
             'regatta': actualID.split("/")[1],
             'raceNumber': actualID.split("/")[2][:-1],
-            'div': actualID.split("/")[2][-1],
+            'division': actualID.split("/")[2][-1],
             'sailorID': sailor.key,
             'partnerID': partnerKey,
             'partnerName': partnerName,
@@ -139,7 +139,7 @@ def updateRaces(newRaces, scores, racers : list[Sailor], scoreVals, predictions,
             'ratingType': ratingType,
             'oldRating': oldRating,
             'newRating': new_rating[0].ordinal(target=config.targetElo, alpha=200 / config.model.sigma),
-            'regAvg:': regattaAvg,
+            'regAvg': regattaAvg,
             'calculatedAt': time.time()
         })
         
