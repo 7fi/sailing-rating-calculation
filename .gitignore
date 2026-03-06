@@ -9,3 +9,8 @@
 *.DS_Store
 *.parquet
 *.html
+/bin
+/include
+/lib
+/lib64
+*.cfg
