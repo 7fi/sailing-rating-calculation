@@ -1,6 +1,7 @@
 from Sailors import Sailor
 import io
 import tempfile
+import pandas as pd
 
 def updateHomepageStats(connection):
     # Update homepage stats
@@ -143,8 +144,9 @@ def uploadAllScores(allFrRows, allTrRows, connection, batch_size=10_000):
     ]
     
     print(allFrRows.columns)
-    for df, table, cols in zip([allFrRows, allTrRows],['FleetScores', 'TRScores'], [fleet_columns, team_columns]):
-        upload_df = df[cols]
+    for upload_df, table, cols in zip([allFrRows, allTrRows],['FleetScores', 'TRScores'], [fleet_columns, team_columns]):
+        upload_df = upload_df.reindex(columns=cols)
+        upload_df['date'] = pd.to_datetime(upload_df['date'], unit='s')
         
         with tempfile.NamedTemporaryFile(mode='w+', suffix='.csv', delete=True) as temp_file:
             # Ensure you use a tab separator to avoid comma-conflicts in names

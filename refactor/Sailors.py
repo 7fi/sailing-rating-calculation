@@ -6,7 +6,7 @@ from multiprocessing import Pool
 from concurrent.futures import ThreadPoolExecutor
 import pandas as pd
 import numpy as np
-from datetime import date
+from datetime import date, datetime
 from functools import partial
 
 @dataclass
@@ -121,7 +121,8 @@ class Sailor:
         if ratingType not in self.ratingTypesReset:
             self.ratingTypesReset.append(ratingType)
         
-        resetDate = resetDate.timestamp()
+        if type(resetDate) != float:
+            resetDate = resetDate.timestamp()
         
         for pos in ['s', 'c']:
             newRT = 'w' if 'w' in ratingType else '' + 't' if 't' in ratingType else '' + pos + 'r'

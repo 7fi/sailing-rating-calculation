@@ -134,6 +134,11 @@ def calcAllRacesForRT(ratingType, people, df_races, allFrRaces, allTrRaces, calc
         regattaAvg = regatta_data.iloc[0]['regAvg']
         womens = regatta_data.iloc[0]['womens']
         date = regatta_data.iloc[0]['Date']
+        if type(date) == str:
+            format = "%Y-%m-%d %H:%M:%S" if len(date) != 10 else "%Y-%m-%d"
+            date = datetime.strptime(date, format).timestamp()
+        elif type(date) != float:
+            date = date.timestamp()
         
         if canSkipCalc:
             updatedAt = regatta_data.iloc[0]['updatedAt']
@@ -241,6 +246,8 @@ def load(rootDir : str, config: Config):
 def main(rootDir : str = "", jupyter = False):
     # %% Load Files
     
+    # rootDir = "./../"
+    
     config : Config = Config()
 
     df_races_full, df_sailor_info, df_sailor_ratings, calculatedAtDict, df_oldFrPostCalcRaces, df_oldTrPostCalcRaces = load(rootDir, config)
@@ -268,6 +275,9 @@ def main(rootDir : str = "", jupyter = False):
     new_rows = df_oldTrPostCalcRaces[~df_oldTrPostCalcRaces['raceID'].isin(existing_race_ids)]
     allTrRaces.extend(new_rows.to_dict('records'))
     
+    df_frAfter = pd.DataFrame(allFrRaces)
+    df_trAfter = pd.DataFrame(allTrRaces)
+    
     print("Calculations finished.\nOutputting to files")
     
     # %% File Output
@@ -281,10 +291,8 @@ def main(rootDir : str = "", jupyter = False):
     
     df_rivals.to_parquet(rootDir + 'rivalstesting.parquet')
     
-    df_frAfter = pd.DataFrame(allFrRaces)
     df_frAfter.to_parquet(rootDir + "postcalcFRraces.parquet")
     
-    df_trAfter = pd.DataFrame(allTrRaces)
     df_trAfter.to_parquet(rootDir + "postcalcTRraces.parquet")
     
     print("File output finished.")
@@ -305,4 +313,4 @@ if __name__ == "__main__":
     # results = pstats.Stats(profile)
     # results.sort_stats(pstats.SortKey.TIME)
     # results.print_stats()
-    # results.dump_stats('profiling.prof')
+    # results.dump_stats('profiling.prof')  
