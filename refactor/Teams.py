@@ -17,30 +17,31 @@ def validPerson(p : Sailor, pos, config: Config):
             # and sum([p['raceCount'][seas] for seas in config.targetSeasons if seas in p['raceCount'].keys()]) > 5
             )
 
-def getOrderedSailors(people : list[Sailor], ratingType, pos, config : Config):
+def getOrderedSailors(people : list[Sailor], ratingType, pos, outlinks_dict, config : Config):
+    # print(ratingType)
     numTops = config.numTops['open' if 'w' not in ratingType else 'womens']
     isTR = 't' in ratingType
+    outlinks_keys = outlinks_dict.keys()
     orderedSailors = sorted([p for p in people
-                            if p.isRankEligible(config.targetSeasons, pos, config.gradCutoff, not isTR)
+                            if p.isRankEligible(config.targetSeasons, pos, config.gradCutoff, outLinks= outlinks_dict[p.key] if p.key in outlinks_keys else None, needsOutlinks= not isTR)
                              and getattr(p, ratingType).mu != config.model.mu
                              ],
                             key=lambda x: getattr(x, ratingType).ordinal(
                                 target=config.targetElo, alpha=config.alpha),
                             reverse=True)
-    # print(ratingType, [t.name for t in orderedSailors[:numTops]])
-    
+
     sailorSum = sum([getattr(p, ratingType).ordinal(target=config.targetElo, alpha=config.alpha)
                             for p in orderedSailors[:numTops]])
     topSailors = [{'name': p.name, 'key': p.key,
                     ratingType: getattr(p, ratingType).ordinal(target=config.targetElo, alpha=config.alpha)} for p in orderedSailors[:numTops]]
     return topSailors, sailorSum
 
-def calculateTopSailors(filtered_people, isTeamRace, isWomens, config: Config):
+def calculateTopSailors(filtered_people, outlinks_dict, isTeamRace, isWomens, config: Config):
     prefix = 't' if isTeamRace else ''
     if isWomens:
         prefix = 'w' + prefix
-    topSkippers, topSkippersSum = getOrderedSailors(filtered_people, prefix + 'sr', 'skipper', config)
-    topCrews, topCrewsSum = getOrderedSailors(filtered_people, prefix + 'cr', 'crew', config)
+    topSkippers, topSkippersSum = getOrderedSailors(filtered_people, prefix + 'sr', 'skipper', outlinks_dict, config)
+    topCrews, topCrewsSum = getOrderedSailors(filtered_people, prefix + 'cr', 'crew', outlinks_dict, config)
 
     numTops = config.numTops['open']
     topRating = (topSkippersSum + topCrewsSum) / (numTops * 2)
@@ -135,15 +136,15 @@ def calculateAvgRating(people : list[Sailor], config:Config):
 
     return sum(ratings) / len(ratings) if len(ratings) > 0 else 0
     
-def uploadTeams(people: dict[str, Sailor], connection, config: Config):
+def uploadTeams(people: dict[str, Sailor], outlinks_dict, connection, config: Config):
     for team, region in teamRegions.items():
         sailors : list[Sailor] = [p for key, p in people.items() if team in p.teams]
         currentSailors : list[Sailor] = [p for p in sailors if p.isOnTeamInSeasons(team, config.targetSeasons)]
         
-        topRating, topSkippers, topCrews = calculateTopSailors(currentSailors, False, False, config)
-        topWomenRating, topWomenSkippers, topWomenCrews = calculateTopSailors(currentSailors, False, True, config)
-        topRatingTR, topSkippersTR, topCrewsTR = calculateTopSailors(currentSailors, True, False, config)
-        topWomenRatingTR, topWomenSkippersTR, topWomenCrewsTR = calculateTopSailors(currentSailors, True, True, config)
+        topRating, topSkippers, topCrews = calculateTopSailors(currentSailors, outlinks_dict, False, False, config)
+        topWomenRating, topWomenSkippers, topWomenCrews = calculateTopSailors(currentSailors, outlinks_dict, False, True, config)
+        topRatingTR, topSkippersTR, topCrewsTR = calculateTopSailors(currentSailors, outlinks_dict, True, False, config)
+        topWomenRatingTR, topWomenSkippersTR, topWomenCrewsTR = calculateTopSailors(currentSailors, outlinks_dict, True, True, config)
         
         avg = calculateAvgRating(currentSailors, config)
         avgRatio = calculateAvgRatio(currentSailors)

@@ -1,6 +1,6 @@
 # %% Imports
-# %load_ext autoreload
-# %autoreload 2
+%load_ext autoreload
+%autoreload 2
 
 from AsyncScraper import runFleetScrape
 from TRScraper import scrapeTR
@@ -187,7 +187,7 @@ def calculateAllRaces(people, df_races, regatta_info, calculatedAtDict: dict, co
     
     return people, allFrRaces, allTrRaces
 
-def upload(people : dict[str, Sailor], df_frAfter, df_trAfter, df_rivals, config: Config):
+def upload(people : dict[str, Sailor], df_frAfter, df_trAfter, df_rivals, outlinks_dict, config: Config):
     # Create a connection
     connection = mysql.connector.connect(
         host=os.getenv('DB_HOST'),
@@ -198,10 +198,10 @@ def upload(people : dict[str, Sailor], df_frAfter, df_trAfter, df_rivals, config
         allow_local_infile=True
     )
 
-    uploadSailors(people, connection, config)
-    uploadTeams(people, connection, config)
-    uploadAllScores(df_frAfter, df_trAfter, connection)
-    uploadRivals(df_rivals, connection)
+    # uploadSailors(people, connection, config)
+    uploadTeams(people, outlinks_dict, connection, config)
+    # uploadAllScores(df_frAfter, df_trAfter, connection)
+    # uploadRivals(df_rivals, connection)
     
     connection.close()
     
@@ -242,7 +242,7 @@ def load(rootDir : str, config: Config):
 def main(rootDir : str = "", jupyter = False):
     # %% Load Files
     
-    # rootDir = "./../"
+    rootDir = "./../"
     
     config : Config = Config()
 
@@ -285,6 +285,8 @@ def main(rootDir : str = "", jupyter = False):
     df_frAfter = pd.DataFrame(allFrRaces)
     df_trAfter = pd.DataFrame(allTrRaces)
     del allFrRaces, allTrRaces
+    # %%
+    outlinks_dict = df_frAfter.groupby('sailorID')['outLinks'].sum().to_dict()
     
     print("Calculations finished.\nOutputting to files")
     
@@ -308,7 +310,7 @@ def main(rootDir : str = "", jupyter = False):
     # %% Upload data
     if config.doUpload:
         print("Uploading to db")
-        upload(people, df_frAfter, df_trAfter, df_rivals, config)
+        upload(people, df_frAfter, df_trAfter, df_rivals, outlinks_dict, config)
 
 # %% Main 
 if __name__ == "__main__":

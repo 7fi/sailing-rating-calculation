@@ -116,6 +116,7 @@ def updateRaces(newRaces, scores, racers : list[Sailor], scoreVals, predictions,
         #     'boatName': teamBoatName, 
         #     'calculatedAt': time.time()
         # })
+        sailor.outLinks += outLinks
         
         newRaces.append({
             'raceID': actualID,
@@ -140,6 +141,7 @@ def updateRaces(newRaces, scores, racers : list[Sailor], scoreVals, predictions,
             'oldRating': oldRating,
             'newRating': new_rating[0].ordinal(target=config.targetElo, alpha=200 / config.model.sigma),
             'regAvg': regattaAvg,
+            'outLinks': outLinks,
             'calculatedAt': time.time()
         })
         

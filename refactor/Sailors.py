@@ -78,12 +78,14 @@ class Sailor:
         return not seasonsSet.isdisjoint(targetSeasons)
     
     def getOutLinks(self):
+        return self.outLinks
         return sum([race['outLinks'] for race in self.races if 'outLinks' in race.keys()])
     
     def getCrossLinks(self):
+        return self.cross
         return len([race for race in self.races if 'cross' in race.keys() and race['cross']])
     
-    def isRankEligible(self, targetSeasons, pos, gradCutoff, needsOutlinks=True):
+    def isRankEligible(self, targetSeasons, pos, gradCutoff, outLinks=None , needsOutlinks=True):
         if self.year is None or self.year == "?? *":
             # print(f"{self.key} has none year")
             return False
@@ -104,7 +106,7 @@ class Sailor:
             return False
         
         return (self.hasTargetSeasons(targetSeasons, pos) # has target seasons
-                        and self.getOutLinks() > 70 if needsOutlinks else True # and has 70 outlinks   
+                        and (outLinks > 70 if outLinks is not None and needsOutlinks else True) # and has 70 outlinks   
                         and betterYear > gradCutoff) # and graduates after the cutoff
         
     def resetRanks(self):
@@ -494,21 +496,21 @@ def uploadSailors(people, connection, config : Config, batch_size=300):
                         'crew': {season: rc_norm.get(season, {}).get('Crew', 0) for season in [s[0] for s in list(ps['crew'])]}
                     })( (lambda rc: {s: {pos.title(): cnt for pos, cnt in posd.items()} for s, posd in rc.items()})(getCounts(p.races)), p.seasons ) 
                     
-        for position in ['skipper', 'crew']:
-            if p.key is None:
-                continue
-            try:
-                for season, team in set(p.seasons[position]):
-                    sailor_teams_rows.append((
-                        p.key.replace("/", "-"),
-                        team,
-                        season,
-                        position,
-                        raceCounts[position][season]
-                    ))
-            except Exception as e:
-                print(position, p.seasons, p.seasons[position])
-                raise e
+        # for position in ['skipper', 'crew']:
+        #     if p.key is None:
+        #         continue
+        #     try:
+        #         for season, team in set(p.seasons[position]):
+        #             sailor_teams_rows.append((
+        #                 p.key.replace("/", "-"),
+        #                 team,
+        #                 season,
+        #                 position,
+        #                 raceCounts[position][season]
+        #             ))
+        #     except Exception as e:
+        #         print(position, p.seasons, p.seasons[position])
+        #         raise e
 
         # Commit in batches
         if (i + 1) % batch_size == 0:
