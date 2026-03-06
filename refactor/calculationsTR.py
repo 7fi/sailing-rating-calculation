@@ -83,25 +83,25 @@ def updateRacesForTeam(allRaces : list[dict], tLetter, index, racers, oppRacers,
         ratingType += 'sr' if pos == 'Skipper' else 'cr'
         raceID = row['raceID'].iat[0]
         
-        racer.races.append({
-            'raceID': raceID, 'raceNum': int(row['raceNum'].iat[0]), 'round':  row['round'].iat[0],
-            'pos': pos,
-            'date': date,
-            'womens': womens,
-            'partner': {'key': partnerKey, 'name': partnerName},
-            'opponentTeam': oppt,
-            'opponentNick': oppn,
-            'score': tscore,
-            'outcome': toutcome,
-            'ratingType': ratingType,
-            'oldRating': oldRating,
-            'newRating': new_rating,
-            'predicted': 'win' if predictions[index][0] == 1 else 'lose',
-            'regAvg': regattaAvg,
-            'venue': venue,
-            'type': 'team', 
-            'calculatedAt': time.time()
-            })
+        # racer.races.append({
+        #     'raceID': raceID, 'raceNum': int(row['raceNum'].iat[0]), 'round':  row['round'].iat[0],
+        #     'pos': pos,
+        #     'date': date,
+        #     'womens': womens,
+        #     'partner': {'key': partnerKey, 'name': partnerName},
+        #     'opponentTeam': oppt,
+        #     'opponentNick': oppn,
+        #     'score': tscore,
+        #     'outcome': toutcome,
+        #     'ratingType': ratingType,
+        #     'oldRating': oldRating,
+        #     'newRating': new_rating,
+        #     'predicted': 'win' if predictions[index][0] == 1 else 'lose',
+        #     'regAvg': regattaAvg,
+        #     'venue': venue,
+        #     'type': 'team', 
+        #     'calculatedAt': time.time()
+        #     })
         
         allRaces.append({
             'raceID': raceID,

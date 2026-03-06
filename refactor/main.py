@@ -236,12 +236,8 @@ def load(rootDir : str, config: Config):
             calculatedAtDict = json.load(f)
     except FileNotFoundError:
         calculatedAtDict = {}
-        
-        
-    df_oldFrPostCalcRaces = pd.read_parquet(rootDir + 'postcalcfrraces.parquet')
-    df_oldTrPostCalcRaces = pd.read_parquet(rootDir + 'postcalctrraces.parquet')
     
-    return df_races_full, df_sailor_info, df_sailor_ratings, calculatedAtDict, df_oldFrPostCalcRaces, df_oldTrPostCalcRaces
+    return df_races_full, df_sailor_info, df_sailor_ratings, calculatedAtDict
 # %%
 def main(rootDir : str = "", jupyter = False):
     # %% Load Files
@@ -250,12 +246,13 @@ def main(rootDir : str = "", jupyter = False):
     
     config : Config = Config()
 
-    df_races_full, df_sailor_info, df_sailor_ratings, calculatedAtDict, df_oldFrPostCalcRaces, df_oldTrPostCalcRaces = load(rootDir, config)
+    df_races_full, df_sailor_info, df_sailor_ratings, calculatedAtDict = load(rootDir, config)
 
     print("Loading complete.\nStarting setup.")
 
     # %% Setup people
     people = setupPeople(df_sailor_ratings, df_sailor_info, config)
+    del df_sailor_info, df_sailor_ratings
     people, df_races_full = handleMerges(df_races_full, people, config)
     
     print("Setup complete.\nStarting calculations.")
@@ -263,20 +260,32 @@ def main(rootDir : str = "", jupyter = False):
     # %% Calculations
     regatta_info = calculateAllRegattaInfo(people, df_races_full, calculatedAtDict, config)
     people, allFrRaces, allTrRaces = calculateAllRaces(people, df_races_full, regatta_info, calculatedAtDict, config)
+    
+    del regatta_info
+    
     people = calculateSailorRanks(people, config)
     updateSailorRatios(people)
+    
     df_rivals = buildRivals(df_races_full, config)
+    del df_races_full
+    
+    df_oldFrPostCalcRaces = pd.read_parquet(rootDir + 'postcalcfrraces.parquet')
     
     existing_race_ids = set(race.get('raceID') for race in allFrRaces)
     new_rows = df_oldFrPostCalcRaces[~df_oldFrPostCalcRaces['raceID'].isin(existing_race_ids)]
     allFrRaces.extend(new_rows.to_dict('records'))
+    del df_oldFrPostCalcRaces
+    
+    df_oldTrPostCalcRaces = pd.read_parquet(rootDir + 'postcalctrraces.parquet')
     
     existing_race_ids = set(race.get('raceID') for race in allTrRaces)
     new_rows = df_oldTrPostCalcRaces[~df_oldTrPostCalcRaces['raceID'].isin(existing_race_ids)]
     allTrRaces.extend(new_rows.to_dict('records'))
+    del  df_oldTrPostCalcRaces
     
     df_frAfter = pd.DataFrame(allFrRaces)
     df_trAfter = pd.DataFrame(allTrRaces)
+    del allFrRaces, allTrRaces
     
     print("Calculations finished.\nOutputting to files")
     

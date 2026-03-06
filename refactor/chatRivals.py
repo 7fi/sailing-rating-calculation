@@ -202,6 +202,7 @@ def uploadRivals(df_rivals, connection, batch_size=10_000):
     
     with connection.cursor() as cursor:
         for i in range(0, len(rival_rows), batch_size):
+            print(f"uploading {i}/{len(rival_rows)}")
             batch = rival_rows[i:i + batch_size]
             cursor.executemany("""
                 INSERT INTO SailorRivals (

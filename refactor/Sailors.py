@@ -218,7 +218,9 @@ def createSailor(sd):
         for entry in sd['Seasons'][pos]:
             newSeasons[pos].append((entry[0], entry[1]))
             
-    return Sailor(sd['Sailor'], sd['key'], sd['gender'], sd['GradYear'], sd['Links'], sd['Teams'], newSeasons, sd['Races'], sd['Rivals'],     
+    return Sailor(sd['Sailor'], sd['key'], sd['gender'], sd['GradYear'], sd['Links'], sd['Teams'], newSeasons, 
+                  [], #sd['Races'] 
+                  {}, #sd['Rivals']     
             PlackettLuceRating(sd['srMU'], sd['srSigma']),
             PlackettLuceRating(sd['crMU'], sd['crSigma']),
             PlackettLuceRating(sd['wsrMU'], sd['wsrSigma']),
