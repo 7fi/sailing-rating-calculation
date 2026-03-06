@@ -118,8 +118,11 @@ def runSailorData(frfile, trfile, oldDataFile, outfile):
     print("----- Scraping sailor data ------")
     df_races = pd.read_parquet(frfile)
     trPeople = pd.read_json(trfile)
-    # old = pd.DataFrame()
-    old = pd.read_parquet(oldDataFile)
+    
+    try:
+        old = pd.read_parquet(oldDataFile)
+    except FileNotFoundError:
+        old = pd.DataFrame()
     
     df_races['Link'] = df_races['Link'].fillna('Unknown') # fill empty links
     links = df_races['Link'].dropna().unique()

@@ -113,7 +113,7 @@ def calculateAllRegattaInfo(people, df_races, calculatedAtDict, config: Config):
         else:
             womens, regattaAvg = getWomensAndRegAvgFR(people, regatta_data, config)
         
-        ratingType = ('w' if womens else '') + 'tr' if scoring == 'team' else 'fr'
+        ratingType = ('w' if womens else '') + ('tr' if scoring == 'team' else 'fr')
         
         regattaDict[regatta_name] = {'scoring': scoring, 'womens': womens, 'regAvg': regattaAvg, 'ratingType': ratingType}    
 
@@ -269,19 +269,18 @@ def main(rootDir : str = "", jupyter = False):
     df_rivals = buildRivals(df_races_full, config)
     del df_races_full
     
-    df_oldFrPostCalcRaces = pd.read_parquet(rootDir + 'postcalcfrraces.parquet')
+    if not config.calcAll:
+        df_oldFrPostCalcRaces = pd.read_parquet(rootDir + 'postcalcFRraces.parquet')
+        existing_race_ids = set(race.get('raceID') for race in allFrRaces)
+        new_rows = df_oldFrPostCalcRaces[~df_oldFrPostCalcRaces['raceID'].isin(existing_race_ids)]
+        allFrRaces.extend(new_rows.to_dict('records'))
+        del df_oldFrPostCalcRaces
     
-    existing_race_ids = set(race.get('raceID') for race in allFrRaces)
-    new_rows = df_oldFrPostCalcRaces[~df_oldFrPostCalcRaces['raceID'].isin(existing_race_ids)]
-    allFrRaces.extend(new_rows.to_dict('records'))
-    del df_oldFrPostCalcRaces
-    
-    df_oldTrPostCalcRaces = pd.read_parquet(rootDir + 'postcalctrraces.parquet')
-    
-    existing_race_ids = set(race.get('raceID') for race in allTrRaces)
-    new_rows = df_oldTrPostCalcRaces[~df_oldTrPostCalcRaces['raceID'].isin(existing_race_ids)]
-    allTrRaces.extend(new_rows.to_dict('records'))
-    del  df_oldTrPostCalcRaces
+        df_oldTrPostCalcRaces = pd.read_parquet(rootDir + 'postcalcTRraces.parquet')
+        existing_race_ids = set(race.get('raceID') for race in allTrRaces)
+        new_rows = df_oldTrPostCalcRaces[~df_oldTrPostCalcRaces['raceID'].isin(existing_race_ids)]
+        allTrRaces.extend(new_rows.to_dict('records'))
+        del  df_oldTrPostCalcRaces
     
     df_frAfter = pd.DataFrame(allFrRaces)
     df_trAfter = pd.DataFrame(allTrRaces)
@@ -315,7 +314,13 @@ def main(rootDir : str = "", jupyter = False):
 if __name__ == "__main__":
     # with cProfile.Profile() as profile:
     start = time.time()
-    main()
+    try:
+        main()
+    except Exception as e:
+        end = time.time()
+        print(f"{int((end-start) // 60)}:{int((end-start) % 60)}")
+        raise e
+        
     end = time.time()
     print(f"{int((end-start) // 60)}:{int((end-start) % 60)}")
     

@@ -227,12 +227,13 @@ def getData(regattaSoups, regattas):
           try:
             teamAID = df_teamReportInfo.loc[(df_teamReportInfo['uniName'] == teamA['name']) & (df_teamReportInfo['teamNick'] == teamA['nick']), 'teamID'].iat[0]
             teamBID = df_teamReportInfo.loc[(df_teamReportInfo['uniName'] == teamB['name']) & (df_teamReportInfo['teamNick'] == teamB['nick']), 'teamID'].iat[0]
+            
+            teamAName = df_sailorteamInfo.loc[df_sailorteamInfo['teamID'] == teamAID, 'teamName'].iat[0]
+            teamBName = df_sailorteamInfo.loc[df_sailorteamInfo['teamID'] == teamBID, 'teamName'].iat[0]
           except IndexError: 
             print(f"Could not match team id in regatta {regattaID} round {round}")
             continue
 
-          teamAName = df_sailorteamInfo.loc[df_sailorteamInfo['teamID'] == teamAID, 'teamName'].iat[0]
-          teamBName = df_sailorteamInfo.loc[df_sailorteamInfo['teamID'] == teamBID, 'teamName'].iat[0]
           
           allSkipperKeys = []
           allCrewKeys = []

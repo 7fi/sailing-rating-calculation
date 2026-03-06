@@ -9,7 +9,7 @@ def updateHomepageStats(connection):
         cursor.execute("""
             UPDATE HomePageStats SET 
                 numSailors = (SELECT COUNT(*) FROM Sailors),
-                numScores = (SELECT COUNT(*) FROM FleetScores) + (SELECT COUNT(*) FROM TRScores),
+                numScores = (SELECT COUNT(*) FROM FleetScores) + (SELECT COUNT(*) * 6 FROM TRScores),
                 numTeams = (SELECT COUNT(*) FROM Teams)
             WHERE id = 1;
         """)
