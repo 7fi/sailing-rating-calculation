@@ -251,9 +251,8 @@ def setupPeople(df_sailor_ratings, df_sailor_info, config: Config):
         pplkeys = people.keys()
         rows = [row for row in df_sailor_info.itertuples(index=False, name=None) if row[0] not in pplkeys]
         results = map(partial(make_sailor, config), rows)
-        newPeople = dict(results)
+        people.update(dict(results))
         
-        people.update(newPeople)
         return people
 
 def handleMerges(df_races, people, config : Config):

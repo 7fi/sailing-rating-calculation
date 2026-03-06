@@ -1,3 +1,4 @@
+# %%
 from bs4 import BeautifulSoup
 import requests
 import json
@@ -113,8 +114,11 @@ async def main(links):
             results = await getBatch(client, batchLinks, semaphore)
             allRows.extend(results)
         return allRows
-
+# %%
 def runSailorData(frfile, trfile, oldDataFile, outfile):
+    # %%
+    # rootDir = "./../"
+    # frfile, trfile, oldDataFile, outfile = rootDir + "racesfrtest.parquet", rootDir + "trSailorInfoAll.json", rootDir + "sailor_data2.parquet", rootDir + "sailor_data2.parquet"
     print("----- Scraping sailor data ------")
     df_races = pd.read_parquet(frfile)
     trPeople = pd.read_json(trfile)
@@ -124,6 +128,7 @@ def runSailorData(frfile, trfile, oldDataFile, outfile):
     except FileNotFoundError:
         old = pd.DataFrame()
     
+    # %%
     df_races['Link'] = df_races['Link'].fillna('Unknown') # fill empty links
     links = df_races['Link'].dropna().unique()
     if 'link' in trPeople.columns:
@@ -135,15 +140,17 @@ def runSailorData(frfile, trfile, oldDataFile, outfile):
         links = [l for l in links if l not in old_links_set]
     print(len(links))
     links = np.unique(links)
-  
+    
+    # %%
     totalRows = asyncio.run(main(links))
     # print(totalRows.shape())
-    if sum([len(x) for x in totalRows]) == 0:
-        old.to_parquet(outfile, index=False)
-        return old
-    ['str', 'str', 'str', 'str', 'str', 'int', 'str', 'str', 'int', 'int']
+    # if sum([len(x) for x in totalRows]) == 0:
+    #     old.to_parquet(outfile, index=False)
+    #     return old
+    
     df_people = pd.DataFrame(totalRows, columns=['key', 'link', 'name', 'first_name', 'last_name', 'gender', 'year', 'teamLink','team','id', 'external_id'])
     
+    # %%
     # Filter people without a link in df_races
     df_races_no_link = df_races[df_races['Link'] == 'Unknown']
 
@@ -172,15 +179,16 @@ def runSailorData(frfile, trfile, oldDataFile, outfile):
 
     # Concatenate the two DataFrames (with and without a link)
     if len(old) > 0:
-        df_people_final = pd.concat([old, df_people, df_no_link], ignore_index=True)
-    else: 
-        df_people_final = pd.concat([df_people, df_no_link], ignore_index=True)
+        df_people = pd.concat([df_people, old], ignore_index=True)
+    if len(df_no_link) > 0: 
+        df_people = pd.concat([df_people, df_no_link], ignore_index=True)
     
-    df_people_final['id'] = pd.to_numeric(df_people_final['id'], errors='raise')
+    df_people['id'] = pd.to_numeric(df_people['id'], errors='raise')
     
+    # %%
     print("outputting to parquet")
-    df_people_final.to_parquet(outfile, index=False)
-    return df_people_final
+    df_people.to_parquet(outfile, index=False)
+    return df_people
 
 if __name__ == "__main__":
     runSailorData("racesfrtest.parquet", "trSailorInfoAll.json", "sailor_data2.parquet", "sailor_data2.parquet")
