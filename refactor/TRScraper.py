@@ -222,14 +222,18 @@ def getData(regattaSoups, regattas):
           round = race_result['round']
           
           teamA = race_result['teamA']
-          teamAID = df_teamReportInfo.loc[(df_teamReportInfo['uniName'] == teamA['name']) & (df_teamReportInfo['teamNick'] == teamA['nick']), 'teamID'].iat[0]
-          # print(teamAID,df_sailorteamInfo)
-          teamAName = df_sailorteamInfo.loc[df_sailorteamInfo['teamID'] == teamAID, 'teamName'].iat[0]
-          
           teamB = race_result['teamB']
-          teamBID = df_teamReportInfo.loc[(df_teamReportInfo['uniName'] == teamB['name']) & (df_teamReportInfo['teamNick'] == teamB['nick']), 'teamID'].iat[0]
-          teamBName = df_sailorteamInfo.loc[df_sailorteamInfo['teamID'] == teamBID, 'teamName'].iat[0]
+          
+          try:
+            teamAID = df_teamReportInfo.loc[(df_teamReportInfo['uniName'] == teamA['name']) & (df_teamReportInfo['teamNick'] == teamA['nick']), 'teamID'].iat[0]
+            teamBID = df_teamReportInfo.loc[(df_teamReportInfo['uniName'] == teamB['name']) & (df_teamReportInfo['teamNick'] == teamB['nick']), 'teamID'].iat[0]
+          except IndexError: 
+            print(f"Could not match team id in regatta {regattaID} round {round}")
+            continue
 
+          teamAName = df_sailorteamInfo.loc[df_sailorteamInfo['teamID'] == teamAID, 'teamName'].iat[0]
+          teamBName = df_sailorteamInfo.loc[df_sailorteamInfo['teamID'] == teamBID, 'teamName'].iat[0]
+          
           allSkipperKeys = []
           allCrewKeys = []
 
@@ -343,6 +347,7 @@ def setup(infile):
   print(len(regattas))
   
 #   regattas = {'s26/harvard-women-team-race': {"link": 's26/harvard-women-team-race', "scoring": 'team', 'rescrape': True}}
+#   regattas = {'s25/pccsc-wahine-team-race-champs': {"link": 's25/pccsc-wahine-team-race-champs', "scoring": 'team', 'rescrape': True}}
 
   regattaSoups = {}
 
@@ -406,10 +411,9 @@ def scrapeTR(infile, outfile, outInfoFile):
   df_totalSailors2.to_json(outInfoFile, index=False)
 
   df_final.to_parquet(f"TR-{date.today().strftime("%Y%m%d")}.parquet", index=False)
-  df_final.to_json(outfile, index=False)
+  df_final.to_parquet(outfile, index=False)
   
   return df_final
 
-
 if __name__ == "__main__":
-    scrapeTR("racesTR.parquet", "racesTR.json", "trSailorInfoAll.json")
+    scrapeTR("racesTR.parquet", "racesTR.parquet", "trSailorInfoAll.json")
