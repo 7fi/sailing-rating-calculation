@@ -1,4 +1,7 @@
 from Sailors import Sailor
+import io
+import tempfile
+import pandas as pd
 
 def updateHomepageStats(connection):
     # Update homepage stats
@@ -117,10 +120,12 @@ def batch_insert(table_name, columns, data, connection, batch_size=10_000):
         batch = data[start:start + batch_size]
         placeholders = ",".join(["%s"] * len(columns))
         updates = ",".join([f"{col} = VALUES({col})" for col in columns])
-        sql = f"""INSERT INTO {table_name} ({','.join(columns)}) VALUES ({placeholders})
-            ON DUPLICATE KEY UPDATE
-                {updates}
-            WHERE lastUpdated < VALUES(calculatedAt)"""
+        sql = f"""INSERT INTO {table_name} 
+                  ({','.join(columns)}) 
+                  VALUES ({placeholders})
+                  ON DUPLICATE KEY UPDATE {updates}
+                  WHERE lastUpdated < VALUES(calculatedAt)"""
+        print(sql)
         with connection.cursor() as cursor:
             cursor.executemany(sql, batch)
     connection.commit()
@@ -138,7 +143,31 @@ def uploadAllScores(allFrRows, allTrRows, connection, batch_size=10_000):
         'date', 'venue', 'boat', 'boatName', 'ratingType', 'oldRating', 'newRating', 'regAvg'
     ]
     
-    batch_insert("FleetScores", fleet_columns, allFrRows, connection, batch_size)
-    batch_insert("TRScores", team_columns, allTrRows, connection, batch_size)
+    print(allFrRows.columns)
+    for upload_df, table, cols in zip([allFrRows, allTrRows],['FleetScores', 'TRScores'], [fleet_columns, team_columns]):
+        upload_df = upload_df.reindex(columns=cols)
+        upload_df['date'] = pd.to_datetime(upload_df['date'], unit='s')
+        
+        with tempfile.NamedTemporaryFile(mode='w+', suffix='.csv', delete=True) as temp_file:
+            # Ensure you use a tab separator to avoid comma-conflicts in names
+            upload_df.to_csv(temp_file.name, index=False, header=False, sep='\t', na_rep='\\N', encoding='utf-8')
+            temp_file.flush() # Ensure all data is written to disk
+
+            # 3. The SQL Command
+            # Use REPLACE to handle the "Update" logic you had before
+            sql = f"""
+            LOAD DATA LOCAL INFILE '{temp_file.name}'
+            REPLACE INTO TABLE {table}
+            FIELDS TERMINATED BY '\t'
+            LINES TERMINATED BY '\n'
+            ({','.join(cols)})
+            """
+        
+            with connection.cursor() as cursor:
+                cursor.execute(sql)
+            connection.commit()
+    
+    # batch_insert("FleetScores", fleet_columns, allFrRows, connection, batch_size)
+    # batch_insert("TRScores", team_columns, allTrRows, connection, batch_size)
         
     updateHomepageStats(connection)

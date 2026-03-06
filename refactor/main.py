@@ -1,3 +1,7 @@
+# %% Imports
+# %load_ext autoreload
+# %autoreload 2
+
 from AsyncScraper import runFleetScrape
 from TRScraper import scrapeTR
 from dataScraper import runSailorData
@@ -109,7 +113,7 @@ def calculateAllRegattaInfo(people, df_races, calculatedAtDict, config: Config):
         else:
             womens, regattaAvg = getWomensAndRegAvgFR(people, regatta_data, config)
         
-        ratingType = 'w' if womens else '' + 'tr' if scoring == 'team' else 'fr'
+        ratingType = ('w' if womens else '') + 'tr' if scoring == 'team' else 'fr'
         
         regattaDict[regatta_name] = {'scoring': scoring, 'womens': womens, 'regAvg': regattaAvg, 'ratingType': ratingType}    
 
@@ -130,6 +134,11 @@ def calcAllRacesForRT(ratingType, people, df_races, allFrRaces, allTrRaces, calc
         regattaAvg = regatta_data.iloc[0]['regAvg']
         womens = regatta_data.iloc[0]['womens']
         date = regatta_data.iloc[0]['Date']
+        if type(date) == str:
+            format = "%Y-%m-%d %H:%M:%S" if len(date) != 10 else "%Y-%m-%d"
+            date = datetime.strptime(date, format).timestamp()
+        elif type(date) != float:
+            date = date.timestamp()
         
         if canSkipCalc:
             updatedAt = regatta_data.iloc[0]['updatedAt']
@@ -178,19 +187,20 @@ def calculateAllRaces(people, df_races, regatta_info, calculatedAtDict: dict, co
     
     return people, allFrRaces, allTrRaces
 
-def upload(people : dict[str, Sailor], allFrRows, allTrRows, df_rivals, config: Config):
+def upload(people : dict[str, Sailor], df_frAfter, df_trAfter, df_rivals, config: Config):
     # Create a connection
     connection = mysql.connector.connect(
         host=os.getenv('DB_HOST'),
         port=os.getenv('DB_PORT'),
         user=os.getenv('DB_USER'),
         password=os.getenv('DB_PASS'),
-        database=os.getenv('DB_NAME')
+        database=os.getenv('DB_NAME'), 
+        allow_local_infile=True
     )
 
     uploadSailors(people, connection, config)
     uploadTeams(people, connection, config)
-    uploadAllScores(allFrRows, allTrRows, connection)
+    uploadAllScores(df_frAfter, df_trAfter, connection)
     uploadRivals(df_rivals, connection)
     
     connection.close()
@@ -200,7 +210,7 @@ def load(rootDir : str, config: Config):
     
     if config.doScrape:
         df_races_fr = runFleetScrape("racesfrtest.parquet", "racesfrtest.parquet") 
-        df_races_tr = scrapeTR("racesTR.json","racesTR.json", "trSailorInfoAll.json")
+        df_races_tr = scrapeTR("racesTR.parquet", "racesTR.parquet", "trSailorInfoAll.json")
         df_sailor_info = runSailorData("racesfrtest.parquet", "trSailorInfoAll.json", "sailor_data2.parquet", "sailor_data2.parquet")
     else: 
         print("Reading from files.")
@@ -222,68 +232,86 @@ def load(rootDir : str, config: Config):
         df_sailor_ratings = pd.read_json(rootDir + "sailors-latest.json")
 
     try:
-        with open("calculated_at_dict.json", "r") as f:
+        with open(rootDir + "calculated_at_dict.json", "r") as f:
             calculatedAtDict = json.load(f)
     except FileNotFoundError:
         calculatedAtDict = {}
-        
-        
-    df_oldFrPostCalcRaces = pd.read_parquet(rootDir + 'postcalcfrraces.parquet')
-    df_oldTrPostCalcRaces = pd.read_parquet(rootDir + 'postcalctrraces.parquet')
     
-    return df_races_full, df_sailor_info, df_sailor_ratings, calculatedAtDict, df_oldFrPostCalcRaces, df_oldTrPostCalcRaces
-
+    return df_races_full, df_sailor_info, df_sailor_ratings, calculatedAtDict
+# %%
 def main(rootDir : str = "", jupyter = False):
+    # %% Load Files
+    
+    # rootDir = "./../"
     
     config : Config = Config()
 
-    df_races_full, df_sailor_info, df_sailor_ratings, calculatedAtDict, df_oldFrPostCalcRaces, df_oldTrPostCalcRaces = load(rootDir, config)
+    df_races_full, df_sailor_info, df_sailor_ratings, calculatedAtDict = load(rootDir, config)
 
     print("Loading complete.\nStarting setup.")
 
+    # %% Setup people
     people = setupPeople(df_sailor_ratings, df_sailor_info, config)
+    del df_sailor_info, df_sailor_ratings
     people, df_races_full = handleMerges(df_races_full, people, config)
-
+    
     print("Setup complete.\nStarting calculations.")
     
+    # %% Calculations
     regatta_info = calculateAllRegattaInfo(people, df_races_full, calculatedAtDict, config)
     people, allFrRaces, allTrRaces = calculateAllRaces(people, df_races_full, regatta_info, calculatedAtDict, config)
+    
+    del regatta_info
+    
     people = calculateSailorRanks(people, config)
     updateSailorRatios(people)
+    
     df_rivals = buildRivals(df_races_full, config)
+    del df_races_full
+    
+    df_oldFrPostCalcRaces = pd.read_parquet(rootDir + 'postcalcfrraces.parquet')
     
     existing_race_ids = set(race.get('raceID') for race in allFrRaces)
     new_rows = df_oldFrPostCalcRaces[~df_oldFrPostCalcRaces['raceID'].isin(existing_race_ids)]
     allFrRaces.extend(new_rows.to_dict('records'))
+    del df_oldFrPostCalcRaces
+    
+    df_oldTrPostCalcRaces = pd.read_parquet(rootDir + 'postcalctrraces.parquet')
     
     existing_race_ids = set(race.get('raceID') for race in allTrRaces)
     new_rows = df_oldTrPostCalcRaces[~df_oldTrPostCalcRaces['raceID'].isin(existing_race_ids)]
     allTrRaces.extend(new_rows.to_dict('records'))
+    del  df_oldTrPostCalcRaces
+    
+    df_frAfter = pd.DataFrame(allFrRaces)
+    df_trAfter = pd.DataFrame(allTrRaces)
+    del allFrRaces, allTrRaces
     
     print("Calculations finished.\nOutputting to files")
     
+    # %% File Output
     with open("calculated_at_dict.json", "w") as f:
         json.dump(calculatedAtDict, f)
     
-    if jupyter:
-        return people, df_races_full
+    # if jupyter:
+    #     return people, df_races_full
     
-    outputSailorsToFile(people, config)
+    outputSailorsToFile(people, rootDir, config)
     
-    df_rivals.to_parquet('rivalstesting.parquet')
+    df_rivals.to_parquet(rootDir + 'rivalstesting.parquet')
     
-    df_frAfter = pd.DataFrame(allFrRaces)
-    df_frAfter.to_parquet("postcalcFRraces.parquet")
+    df_frAfter.to_parquet(rootDir + "postcalcFRraces.parquet")
     
-    df_trAfter = pd.DataFrame(allTrRaces)
-    df_trAfter.to_parquet("postcalcTRraces.parquet")
+    df_trAfter.to_parquet(rootDir + "postcalcTRraces.parquet")
     
     print("File output finished.")
     
+    # %% Upload data
     if config.doUpload:
         print("Uploading to db")
-        upload(people, df_rivals, config)
+        upload(people, df_frAfter, df_trAfter, df_rivals, config)
 
+# %% Main 
 if __name__ == "__main__":
     # with cProfile.Profile() as profile:
     start = time.time()
@@ -294,4 +322,4 @@ if __name__ == "__main__":
     # results = pstats.Stats(profile)
     # results.sort_stats(pstats.SortKey.TIME)
     # results.print_stats()
-    # results.dump_stats('profiling.prof')
+    # results.dump_stats('profiling.prof')  

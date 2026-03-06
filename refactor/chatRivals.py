@@ -58,9 +58,10 @@ def buildRivals(dfr: pd.DataFrame, config: Config):
 
     rivals = defaultdict(lambda: [0, 0])  # [wins, total]
 
+    print("Processing fleet rivals")
     # Fleet race processing
     for (race_id, season_id, pos_id), idx in grouped.items():
-
+        
         race_sailors = sailor_arr[idx]
         race_scores = score_arr[idx]
 
@@ -82,6 +83,7 @@ def buildRivals(dfr: pd.DataFrame, config: Config):
                 rivals[key_win][1] += 1
                 rivals[key_loss][1] += 1
 
+    print("processing team racing rivals")
     # Team race processing
     for _, row in team_df.iterrows():
 
@@ -200,6 +202,7 @@ def uploadRivals(df_rivals, connection, batch_size=10_000):
     
     with connection.cursor() as cursor:
         for i in range(0, len(rival_rows), batch_size):
+            print(f"uploading {i}/{len(rival_rows)}")
             batch = rival_rows[i:i + batch_size]
             cursor.executemany("""
                 INSERT INTO SailorRivals (

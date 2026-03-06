@@ -92,37 +92,37 @@ def updateRaces(newRaces, scores, racers : list[Sailor], scoreVals, predictions,
         ratingType = ('w' if womens else '') + ('s' if pos.lower() == 'skipper' else 'c') + 'r'
         
         # add race to each sailor's score
-        sailor.races.append({
-            # Need to rewrite to include DNF and such (correctly evaluating score but its hard to tell)
-            'score': int(score),
-            'pos': pos,
-            'predicted': pred[0],
-            'ratio': 1 - ((int(score) - 1) / (len(racers) - 1)),
-            'regAvg': regattaAvg,
-            'cross': isCross,
-            'outLinks': outLinks,
-            'ratingType': ratingType,
-            'oldRating': oldRating,
-            'newRating': new_rating[0].ordinal(target=config.targetElo, alpha=200 / config.model.sigma),
-            'newMu': new_rating[0].mu,
-            'newSigma':new_rating[0].sigma,
-            'womens': womens,
-            'date': date,
-            'partner': {'name': partnerName, 'key': partnerKey},
-            'venue': venue,
-            'raceID': actualID,
-            'type': 'fleet',
-            'scoring': scoring,
-            'boatName': teamBoatName, 
-            'calculatedAt': time.time()
-        })
+        # sailor.races.append({
+        #     # Need to rewrite to include DNF and such (correctly evaluating score but its hard to tell)
+        #     'score': int(score),
+        #     'pos': pos,
+        #     'predicted': pred[0],
+        #     'ratio': 1 - ((int(score) - 1) / (len(racers) - 1)),
+        #     'regAvg': regattaAvg,
+        #     'cross': isCross,
+        #     'outLinks': outLinks,
+        #     'ratingType': ratingType,
+        #     'oldRating': oldRating,
+        #     'newRating': new_rating[0].ordinal(target=config.targetElo, alpha=200 / config.model.sigma),
+        #     'newMu': new_rating[0].mu,
+        #     'newSigma':new_rating[0].sigma,
+        #     'womens': womens,
+        #     'date': date,
+        #     'partner': {'name': partnerName, 'key': partnerKey},
+        #     'venue': venue,
+        #     'raceID': actualID,
+        #     'type': 'fleet',
+        #     'scoring': scoring,
+        #     'boatName': teamBoatName, 
+        #     'calculatedAt': time.time()
+        # })
         
         newRaces.append({
             'raceID': actualID,
             'season': actualID.split("/")[0],
             'regatta': actualID.split("/")[1],
             'raceNumber': actualID.split("/")[2][:-1],
-            'div': actualID.split("/")[2][-1],
+            'division': actualID.split("/")[2][-1],
             'sailorID': sailor.key,
             'partnerID': partnerKey,
             'partnerName': partnerName,
@@ -139,7 +139,7 @@ def updateRaces(newRaces, scores, racers : list[Sailor], scoreVals, predictions,
             'ratingType': ratingType,
             'oldRating': oldRating,
             'newRating': new_rating[0].ordinal(target=config.targetElo, alpha=200 / config.model.sigma),
-            'regAvg:': regattaAvg,
+            'regAvg': regattaAvg,
             'calculatedAt': time.time()
         })
         
