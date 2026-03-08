@@ -199,9 +199,9 @@ def upload(people : dict[str, Sailor], df_frAfter, df_trAfter, df_rivals, outlin
     )
 
     # uploadSailors(people, connection, config)
-    uploadTeams(people, outlinks_dict, connection, config)
-    # uploadAllScores(df_frAfter, df_trAfter, connection)
-    # uploadRivals(df_rivals, connection)
+    # uploadTeams(people, outlinks_dict, connection, config)
+    uploadAllScores(df_frAfter, df_trAfter, connection)
+    # uploadRivals(df_rivals, connection)\
     
     connection.close()
     
@@ -302,7 +302,6 @@ def main(rootDir : str = "", jupyter = False):
     df_rivals.to_parquet(rootDir + 'rivalstesting.parquet')
     
     df_frAfter.to_parquet(rootDir + "postcalcFRraces.parquet")
-    
     df_trAfter.to_parquet(rootDir + "postcalcTRraces.parquet")
     
     print("File output finished.")

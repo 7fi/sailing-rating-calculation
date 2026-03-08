@@ -496,21 +496,21 @@ def uploadSailors(people, connection, config : Config, batch_size=300):
                         'crew': {season: rc_norm.get(season, {}).get('Crew', 0) for season in [s[0] for s in list(ps['crew'])]}
                     })( (lambda rc: {s: {pos.title(): cnt for pos, cnt in posd.items()} for s, posd in rc.items()})(getCounts(p.races)), p.seasons ) 
                     
-        # for position in ['skipper', 'crew']:
-        #     if p.key is None:
-        #         continue
-        #     try:
-        #         for season, team in set(p.seasons[position]):
-        #             sailor_teams_rows.append((
-        #                 p.key.replace("/", "-"),
-        #                 team,
-        #                 season,
-        #                 position,
-        #                 raceCounts[position][season]
-        #             ))
-        #     except Exception as e:
-        #         print(position, p.seasons, p.seasons[position])
-        #         raise e
+        for position in ['skipper', 'crew']:
+            if p.key is None:
+                continue
+            try:
+                for season, team in set(p.seasons[position]):
+                    sailor_teams_rows.append((
+                        p.key.replace("/", "-"),
+                        team,
+                        season,
+                        position,
+                        raceCounts[position][season]
+                    ))
+            except Exception as e:
+                print(position, p.seasons, p.seasons[position])
+                raise e
 
         # Commit in batches
         if (i + 1) % batch_size == 0:

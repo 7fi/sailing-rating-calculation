@@ -137,6 +137,7 @@ def uploadAllScores(allFrRows, allTrRows, connection, batch_size=10_000):
         'score', 'predicted', 'ratio', 'penalty', 'position', 'date', 'scoring', 'venue',
         'boat','boatName', 'ratingType', 'oldRating', 'newRating', 'regAvg'
     ]
+    
     team_columns = [
         'season', 'regatta', 'raceNumber', 'round', 'sailorID', 'partnerID', 'partnerName',
         'opponentTeam', 'opponentNick', 'score', 'outcome', 'predicted', 'penalty', 'position',
@@ -144,7 +145,8 @@ def uploadAllScores(allFrRows, allTrRows, connection, batch_size=10_000):
     ]
     
     print(allFrRows.columns)
-    for upload_df, table, cols in zip([allFrRows, allTrRows],['FleetScores', 'TRScores'], [fleet_columns, team_columns]):
+    for upload_df, table, cols in zip([allFrRows, allTrRows],
+                                      ['FleetScores', 'TRScores'], [fleet_columns, team_columns]):
         upload_df = upload_df.reindex(columns=cols)
         upload_df['date'] = pd.to_datetime(upload_df['date'], unit='s')
         
