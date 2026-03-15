@@ -1,6 +1,6 @@
 # %% Imports
-%load_ext autoreload
-%autoreload 2
+# %load_ext autoreload
+# %autoreload 2
 
 from AsyncScraper import runFleetScrape
 from TRScraper import scrapeTR
@@ -37,18 +37,27 @@ def getScoring(regatta_data):
         scoring = regatta_data.iloc[0]['Scoring'].iat[0]
     return scoring
 
-def getWomensAndRegAvgFR(people, regatta_data, config: Config):
+def getPeopleFR(people, regatta_data,config):
     skipper_keys = regatta_data.loc[regatta_data['Position'] == 'Skipper']['key'].unique()
     skippers = [people[k] for k in skipper_keys if k in people.keys()]
 
     crew_keys = regatta_data.loc[regatta_data['Position'] == 'Crew']['key'].unique()
     crews = [people[k] for k in crew_keys if k in people.keys()]
+    return skippers, crews,
+
+def getWomensFR(people, regatta_data, config: Config):
+    skippers, crews = getPeopleFR(people, regatta_data, config)
 
     genders = [p.gender for p in skippers + crews]
     womenCount = sum([1 if g == "F" else 0 for g in genders])
     womens = 'M' not in genders and womenCount >= 4
+    return womens
+
+def getRegAvgFR(people, womens, regatta_data, config: Config):
+    skippers, crews = getPeopleFR(people, regatta_data, config)
+    
     tempRating = 0
-    for type, racers in zip(['Skiper', 'Crew'], [skippers, crews]):
+    for type, racers in zip(['Skipper', 'Crew'], [skippers, crews]):
         if womens:
             ratings = [r.wsr if type ==
                         'Skipper' else r.wcr for r in racers]
@@ -56,15 +65,15 @@ def getWomensAndRegAvgFR(people, regatta_data, config: Config):
             ratings = [r.sr if type ==
                         'Skipper' else r.cr for r in racers]
 
-        startingRating = [
+        startingRatings = [
             r.ordinal(target=config.targetElo, alpha=config.alpha) for r in ratings]
-        tempRating += sum(startingRating)
+        tempRating += sum(startingRatings)
 
     regattaAvg = tempRating / len(skippers + crews)
     
-    return womens, regattaAvg
+    return regattaAvg
 
-def getWomensAndRegAvgTR(people, regatta_data, config : Config):
+def getPeopleInTR(people, regatta_data, config: Config):
     skipper_keys = [k for kl in regatta_data['allSkipperKeys']
                     for k in kl]
     crew_keys = [k for kl in regatta_data['allCrewKeys'] for k in kl]
@@ -77,13 +86,21 @@ def getWomensAndRegAvgTR(people, regatta_data, config : Config):
 
     skippers = [people[k] for k in skipper_keys if k in people.keys()]
     crews = [people[k] for k in crew_keys if k in people.keys()]
+    return skippers, crews
+
+def getWomensTR(people, regatta_data, config: Config):
+    skippers, crews = getPeopleInTR(people,regatta_data, config)
 
     genders = [p.gender for p in skippers + crews]
     womenCount = sum([1 if g == "F" else 0 for g in genders])
     womens = 'M' not in genders and womenCount >= 4
+    return womens
+
+def getRegAvgTR(people, womens, regatta_data, config : Config):
+    skippers, crews = getPeopleInTR(people, regatta_data, config)
 
     tempRating = 0
-    for type, racers in zip(['Skiper', 'Crew'], [skippers, crews]):
+    for type, racers in zip(['Skipper', 'Crew'], [skippers, crews]):
         if womens:
             ratings = [r.wtsr if type == 'Skipper' else r.wtcr for r in racers]
         else:
@@ -94,7 +111,7 @@ def getWomensAndRegAvgTR(people, regatta_data, config : Config):
 
     regattaAvg = tempRating / len(skippers + crews)
     
-    return womens, regattaAvg
+    return regattaAvg
     
 def resetPeopleToBeforeSeason(people : list[Sailor], season : str, ratingType: str):
     for person in people:
@@ -109,13 +126,13 @@ def calculateAllRegattaInfo(people, df_races, calculatedAtDict, config: Config):
         scoring = getScoring(regatta_data)
 
         if scoring == 'team':
-            womens, regattaAvg = getWomensAndRegAvgTR(people, regatta_data, config)
+            womens = getWomensTR(people, regatta_data, config)
         else:
-            womens, regattaAvg = getWomensAndRegAvgFR(people, regatta_data, config)
+            womens = getWomensFR(people, regatta_data, config)
         
         ratingType = ('w' if womens else '') + ('tr' if scoring == 'team' else 'fr')
         
-        regattaDict[regatta_name] = {'scoring': scoring, 'womens': womens, 'regAvg': regattaAvg, 'ratingType': ratingType}    
+        regattaDict[regatta_name] = {'scoring': scoring, 'womens': womens, 'ratingType': ratingType}    
 
     return regattaDict
 
@@ -131,7 +148,6 @@ def calcAllRacesForRT(ratingType, people, df_races, allFrRaces, allTrRaces, calc
     for regatta_name, regatta_data in regatta_groups:
         season = regatta_data.iloc[0]['raceID'].split("/")[0]
         scoring = regatta_data.iloc[0]['scoring']
-        regattaAvg = regatta_data.iloc[0]['regAvg']
         womens = regatta_data.iloc[0]['womens']
         date = regatta_data.iloc[0]['Date']
         if type(date) == str:
@@ -163,8 +179,10 @@ def calcAllRacesForRT(ratingType, people, df_races, allFrRaces, allTrRaces, calc
 
             for pos in ['Skipper', 'Crew']:
                 if scoring == 'team':
+                    regattaAvg = getRegAvgTR(people, womens,regatta_data, config)
                     calculateTR(allTrRaces, people, resetDate, date, row, pos, season, regattaAvg, womens, config)
                 else:
+                    regattaAvg = getRegAvgFR(people, womens,regatta_data, config)
                     calculateFR(allFrRaces, people, resetDate, date, regatta_name, raceID[0], row, pos, scoring, season, regattaAvg, womens, ratingType, config)
     return people, allFrRaces, allTrRaces
     
@@ -242,11 +260,13 @@ def load(rootDir : str, config: Config):
 def main(rootDir : str = "", jupyter = False):
     # %% Load Files
     
-    rootDir = "./../"
+    # rootDir = "./../"
     
     config : Config = Config()
 
     df_races_full, df_sailor_info, df_sailor_ratings, calculatedAtDict = load(rootDir, config)
+    
+    # df_races_full = df_races_full.loc[df_races_full['season'] == 'f25']
 
     print("Loading complete.\nStarting setup.")
 
@@ -267,7 +287,7 @@ def main(rootDir : str = "", jupyter = False):
     updateSailorRatios(people)
     
     df_rivals = buildRivals(df_races_full, config)
-    del df_races_full
+    # del df_races_full
     
     if not config.calcAll:
         df_oldFrPostCalcRaces = pd.read_parquet(rootDir + 'postcalcFRraces.parquet')
@@ -291,11 +311,6 @@ def main(rootDir : str = "", jupyter = False):
     print("Calculations finished.\nOutputting to files")
     
     # %% File Output
-    with open("calculated_at_dict.json", "w") as f:
-        json.dump(calculatedAtDict, f)
-    
-    # if jupyter:
-    #     return people, df_races_full
     
     outputSailorsToFile(people, rootDir, config)
     
@@ -303,6 +318,9 @@ def main(rootDir : str = "", jupyter = False):
     
     df_frAfter.to_parquet(rootDir + "postcalcFRraces.parquet")
     df_trAfter.to_parquet(rootDir + "postcalcTRraces.parquet")
+    
+    with open("calculated_at_dict.json", "w") as f:
+        json.dump(calculatedAtDict, f)
     
     print("File output finished.")
     
