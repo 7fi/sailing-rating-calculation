@@ -1471,7 +1471,7 @@ if __name__ == "__main__":
     if not calc_all:
         cutoff = (datetime.now() - timedelta(weeks=2))
         df_races_full = df_races_full.loc[df_races_full['date'] > cutoff]
-        df_sailor_ratings = pd.read_json("sailors-latest.json")
+        df_sailor_ratings = pd.read_json("sailors-latest-fullfile.json")
         # df_sailor_ratings = pd.read_json("sailors-20250424.json")
 
     if doScrape:
