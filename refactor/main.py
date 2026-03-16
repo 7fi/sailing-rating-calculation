@@ -170,6 +170,12 @@ def calcAllRacesForRT(ratingType, people, df_races, allFrRaces, allTrRaces, calc
         race_groups = regatta_data.groupby(['adjusted_raceID'], sort=False)
         
         calculatedAtDict[season] = time.time()
+        
+        if scoring == 'team':
+            regattaAvg = getRegAvgTR(people, womens,regatta_data, config)
+        else: 
+            regattaAvg = getRegAvgFR(people, womens,regatta_data, config)
+            
 
         # Iterate through each race in this regatta
         for raceID, row in race_groups:
@@ -179,10 +185,8 @@ def calcAllRacesForRT(ratingType, people, df_races, allFrRaces, allTrRaces, calc
 
             for pos in ['Skipper', 'Crew']:
                 if scoring == 'team':
-                    regattaAvg = getRegAvgTR(people, womens,regatta_data, config)
                     calculateTR(allTrRaces, people, resetDate, date, row, pos, season, regattaAvg, womens, config)
                 else:
-                    regattaAvg = getRegAvgFR(people, womens,regatta_data, config)
                     calculateFR(allFrRaces, people, resetDate, date, regatta_name, raceID[0], row, pos, scoring, season, regattaAvg, womens, ratingType, config)
     return people, allFrRaces, allTrRaces
     
@@ -216,10 +220,10 @@ def upload(people : dict[str, Sailor], df_frAfter, df_trAfter, df_rivals, outlin
         allow_local_infile=True
     )
 
-    # uploadSailors(people, connection, config)
-    # uploadTeams(people, outlinks_dict, connection, config)
+    uploadSailors(people, connection, config)
+    uploadTeams(people, outlinks_dict, connection, config)
     uploadAllScores(df_frAfter, df_trAfter, connection)
-    # uploadRivals(df_rivals, connection)\
+    uploadRivals(df_rivals, connection)
     
     connection.close()
     
