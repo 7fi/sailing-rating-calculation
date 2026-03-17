@@ -209,7 +209,7 @@ def calculateAllRaces(people, df_races, regatta_info, calculatedAtDict: dict, co
     
     return people, allFrRaces, allTrRaces
 
-def upload(people : dict[str, Sailor], df_frAfter, df_trAfter, df_rivals, outlinks_dict, config: Config):
+def upload(people : dict[str, Sailor], df_frAfter, df_trAfter, df_rivals, outlinks_dict, racecounts_dict, winp_dict, config: Config):
     # Create a connection
     connection = mysql.connector.connect(
         host=os.getenv('DB_HOST'),
@@ -221,7 +221,7 @@ def upload(people : dict[str, Sailor], df_frAfter, df_trAfter, df_rivals, outlin
     )
 
     uploadSailors(people, connection, config)
-    uploadTeams(people, outlinks_dict, connection, config)
+    uploadTeams(people, outlinks_dict, racecounts_dict, winp_dict, connection, config)
     uploadAllScores(df_frAfter, df_trAfter, connection)
     uploadRivals(df_rivals, connection)
     
@@ -291,7 +291,7 @@ def main(rootDir : str = "", jupyter = False):
     updateSailorRatios(people)
     
     df_rivals = buildRivals(df_races_full, config)
-    # del df_races_full
+    del df_races_full
     
     if not config.calcAll:
         df_oldFrPostCalcRaces = pd.read_parquet(rootDir + 'postcalcFRraces.parquet')
@@ -312,6 +312,21 @@ def main(rootDir : str = "", jupyter = False):
     # %%
     outlinks_dict = df_frAfter.groupby('sailorID')['outLinks'].sum().to_dict()
     
+    df_trAfter['ratio'] = df_trAfter['outcome'].map({'win': 1, 'lose': 0, 'tie': 0.5})
+    combined = pd.concat([df_frAfter, df_trAfter])
+    combined['position'] = combined['position'].apply(lambda x: x.lower())
+    
+    winp_dict = combined.loc[combined['ratio'] >= 0].groupby(['sailorID', 'position', 'season'])['ratio'].mean().to_dict()
+    
+    counts = combined.groupby(['sailorID', 'position', 'season']).size()
+
+    racecounts_dict = {}
+    for (s_id, pos, season), count in counts.items():
+        racecounts_dict.setdefault(s_id, {}).setdefault(pos.lower(), {})[season] = count
+    
+    del counts
+    
+    
     print("Calculations finished.\nOutputting to files")
     
     # %% File Output
@@ -331,7 +346,7 @@ def main(rootDir : str = "", jupyter = False):
     # %% Upload data
     if config.doUpload:
         print("Uploading to db")
-        upload(people, df_frAfter, df_trAfter, df_rivals, outlinks_dict, config)
+        upload(people, df_frAfter, df_trAfter, df_rivals, outlinks_dict, racecounts_dict, winp_dict, config)
 
 # %% Main 
 if __name__ == "__main__":
