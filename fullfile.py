@@ -340,7 +340,9 @@ def calculateFR(people, date, regatta, race, row, type, scoring, season, residua
                   else people[name + "-" + team] for key, name, team in zip(keys, names, teams)]
     except Exception as e:
         print(regatta)
-        raise e
+        print(e)
+        # raise e
+        return
 
     # Check for womens regatta
     partnerKeys = scores['PartnerLink']
