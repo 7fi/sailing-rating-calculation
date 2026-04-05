@@ -461,7 +461,7 @@ def uploadSailors(people, connection, config : Config, batch_size=300):
                         """
 
     for i, p in enumerate(eligible):
-        if p.key is None:
+        if p.key is None or p.name is None or p.name == "":
             print("No key for", p.name)
             continue
 

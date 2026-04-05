@@ -91,7 +91,7 @@ async def fetchData(client, semaphore, link):
             return []
     else:
         print("no sailor data for", link)
-        return []
+        return [link, link, "", "", "", "", "", "", "", "", ""]
 
 async def getBatch(client, links, semaphore):
     tasks = []
