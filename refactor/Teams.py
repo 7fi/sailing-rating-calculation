@@ -105,18 +105,19 @@ def uploadSailorTeams(filtered_people : list[Sailor], team, topSkippers: list[li
             print("Batch insert failed:", e)
             raise e
     
-def calculateAvgRatio(filtered_people: list[Sailor]):
-    skipperRatios = [p.avgSkipperRatio for p in filtered_people if p.avgSkipperRatio != 0 and not np.isnan(p.avgSkipperRatio)]
-    avgSkipperRatio = 0
-    if(len(skipperRatios) > 0):
-        avgSkipperRatio = sum(skipperRatios) / len(skipperRatios)
+def calculateAvgRatio(filtered_people: list[Sailor], winp_dict):
+    winps = [winp_dict.get((s.key, pos, season), 0) for s in filtered_people for pos in ['skipper', 'crew'] for season, st in s.seasons[pos] ]
+    # winps = []
+    # for pos in ['skipper', 'crew']:
+    #     for sailor in filtered_people:
+    #         for season in sailor.seasons[pos]:
+    #             print(sailor.key, season)
+    #             winps.append(winp_dict.get((sailor.key, pos, season), 0))
     
-    crewRatios = [p.avgCrewRatio for p in filtered_people if p.avgCrewRatio != 0 and not np.isnan(p.avgCrewRatio)]
-    avgCrewRatio = 0
-    if(len(crewRatios) > 0):
-        avgCrewRatio = sum(crewRatios) / len(crewRatios)
-    
-    avgRatio = (avgSkipperRatio + avgCrewRatio) / 2
+    if len(winps) > 0:
+        avgRatio = np.mean(winps)
+    else:
+        avgRatio = 0
     return avgRatio
 
 def calculateAvgRating(people : list[Sailor], config:Config):
@@ -153,7 +154,8 @@ def uploadTeams(people: dict[str, Sailor], outlinks_dict, racecounts_dict, winp_
         topWomenRatingTR, topWomenSkippersTR, topWomenCrewsTR = calculateTopSailors(currentSailors, outlinks_dict, True, True, config)
         
         avg = calculateAvgRating(currentSailors, config)
-        avgRatio = calculateAvgRatio(currentSailors)
+        avgRatio = calculateAvgRatio(currentSailors, winp_dict)
+        print(team, avgRatio)
         
         with connection.cursor() as cursor:
             cursor.execute("""
