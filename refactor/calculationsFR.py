@@ -17,27 +17,6 @@ def updateRatings(racers : list[Sailor], ratings : list[PlackettLuceRating], pos
                 racer.wcr = new_rating[0]
             else:
                 racer.cr = new_rating[0]
-
-def updateRivals(sailor : Sailor, season, score, racers, scoreVals, pos):
-    for other, otherScore in zip(racers, scoreVals):
-        if other.key == sailor.key:
-            continue
-        
-        wonThisRace = (1 if otherScore > score else 0)
-        
-        rival = sailor.rivals.setdefault(pos, # try and grab counts for this position, with fallback
-                                         {}).setdefault(
-            other.key, # try and grab the info about the other sailor, with fallback
-            {
-                'name': other.name,
-                'races': {},
-                'team': other.teams[-1],
-                'wins': {}
-            }
-        )
-
-        rival['races'][season] = rival['races'].get(season, 0) + 1
-        rival['wins'][season] = rival['wins'].get(season, 0) + wonThisRace
                 
 def updateSeasons(sailor, season, team, pos):
     if season not in [s[0] for s in sailor.seasons[pos.lower()]]:
@@ -66,11 +45,9 @@ def updateCrossLinks(sailor, isCross, regions, race, config : Config):
     
     return outLinks
 
-def updateRaces(newRaces, scores, racers : list[Sailor], scoreVals, predictions, partnerKeys, partnerNames, startingRating, ratings, teams, teamBoatNames, race, scoring, season, date, womens, regattaAvg, pos, config : Config):
+def updateRaces(newRaces, venue, actualID, penalties, racers : list[Sailor], scoreVals, predictions, partnerKeys, partnerNames, startingRating, ratings, teams, teamBoatNames, boatType, race, scoring, season, date, womens, regattaAvg, pos, config : Config):
     if pos.lower() not in ['skipper', 'crew']:
         print("Pos is weird value in updateRaces ", pos)
-    venue = scores['Venue'].iat[0]
-    actualID = scores['raceID'].iat[0]
 
     # Make list of regions and combine PCCSC and NWICSA (those shouldnt count as cross regional for rating purposes)
     regions = [teamRegions[p.teams[-1]] if p.teams[-1]
@@ -81,41 +58,14 @@ def updateRaces(newRaces, scores, racers : list[Sailor], scoreVals, predictions,
     isCross = True if len(set(regions)) > 1 else False
 
     # Loop through each sailor and the associated values
-    for sailor, score, pred, partnerKey, partnerName, oldRating, new_rating, team, teamBoatName in zip(racers, scoreVals, predictions, partnerKeys, partnerNames, startingRating, ratings, teams, teamBoatNames):
+    for sailor, score, penalty, pred, partnerKey, partnerName, oldRating, new_rating, team, teamBoatName in zip(racers, scoreVals, penalties, predictions, partnerKeys, partnerNames, startingRating, ratings, teams, teamBoatNames):
 
         outLinks = updateCrossLinks(sailor, isCross, regions, race, config)
 
         updateSeasons(sailor, season, team, pos)
 
-        # updateRivals(sailor, season, score, racers, scoreVals, pos)
-
         ratingType = ('w' if womens else '') + ('s' if pos.lower() == 'skipper' else 'c') + 'r'
         
-        # add race to each sailor's score
-        # sailor.races.append({
-        #     # Need to rewrite to include DNF and such (correctly evaluating score but its hard to tell)
-        #     'score': int(score),
-        #     'pos': pos,
-        #     'predicted': pred[0],
-        #     'ratio': 1 - ((int(score) - 1) / (len(racers) - 1)),
-        #     'regAvg': regattaAvg,
-        #     'cross': isCross,
-        #     'outLinks': outLinks,
-        #     'ratingType': ratingType,
-        #     'oldRating': oldRating,
-        #     'newRating': new_rating[0].ordinal(target=config.targetElo, alpha=200 / config.model.sigma),
-        #     'newMu': new_rating[0].mu,
-        #     'newSigma':new_rating[0].sigma,
-        #     'womens': womens,
-        #     'date': date,
-        #     'partner': {'name': partnerName, 'key': partnerKey},
-        #     'venue': venue,
-        #     'raceID': actualID,
-        #     'type': 'fleet',
-        #     'scoring': scoring,
-        #     'boatName': teamBoatName, 
-        #     'calculatedAt': time.time()
-        # })
         sailor.outLinks += outLinks
         
         newRaces.append({
@@ -130,12 +80,12 @@ def updateRaces(newRaces, scores, racers : list[Sailor], scoreVals, predictions,
             'score': int(score),
             'predicted': pred[0],
             'ratio': 1 - ((int(score) - 1) / (len(racers) - 1)),
-            'penalty': '',
+            'penalty': penalty,
             'position': pos,
             'date': date,
             'scoring': scoring,
             'venue': venue,
-            'boat': '',
+            'boat': boatType,
             'boatName': teamBoatName,
             'ratingType': ratingType,
             'oldRating': oldRating,
@@ -144,21 +94,8 @@ def updateRaces(newRaces, scores, racers : list[Sailor], scoreVals, predictions,
             'outLinks': outLinks,
             'calculatedAt': time.time()
         })
-        
-        # 'cross': isCross,
-        # 'outLinks': outLinks
-        
-def getPartners(scores, config : Config):
-    partnerKeys = scores['PartnerLink']
-    partnerKeys = [pk if pk not in config.merges.keys() else config.merges[pk] for pk in partnerKeys]
-    partnerNames = scores['Partner']
-    
-    return partnerKeys, partnerNames
 
-def getRacers(people : list[Sailor], scores, keys, teams, regatta, resetDate, date, ratingType):
-    names = scores['Sailor']  # the sailor names
-    
-    # Grab people objects
+def getRacers(people : list[Sailor], names, keys, teams, regatta, resetDate, date, ratingType):
     racers = []
     try:
         racers = [people[key] if key != 'Unknown'
@@ -187,28 +124,58 @@ def calculateFR(newRaces : list, people : dict[str, Sailor], resetDate, date, re
         print("Pos is weird value in main calcfr ", pos)
     scores = row[row['Position'] == pos]
     keys = scores['key']  # the sailor keys
+    names = scores['Sailor']
+    
+    partnerKeys = scores['PartnerLink']
+    partnerKeys = [pk if pk not in config.merges.keys() else config.merges[pk] for pk in partnerKeys]
+    partnerNames = scores['Partner']
+    
     teams = scores['Team']  # the sailors team
     teamBoatNames = scores['TeamBoatName']  # the sailors team
     scoreVals = list(scores['Score'])  # the score values
+    penalties = list(scores['penalty'])
+    
+    excusedPenalties = ["DNS", "BKD", "RDG", "BYE"]
 
     # check for invalid race conditions
     if len(keys) < 2:  # less than two sailors
         return
     if np.isnan(scoreVals[0]):  # B division did not complete the set
         return
+    
+    boatType = scores['Boat'].iat[0]
+    venue = scores['Venue'].iat[0]
+    actualID = scores['raceID'].iat[0]
 
-    racers : list[Sailor] = getRacers(people, scores, keys, teams, regatta, resetDate, date, ratingType)
-
-    partnerKeys , partnerNames = getPartners(scores, config)
+    racers : list[Sailor] = getRacers(people, names, keys, teams, regatta, resetDate, date, ratingType)
 
     ratings = [[r.getRating(pos, 'fleet', womens)] for r in racers]
 
     startingRating = [r[0].ordinal(target=config.targetElo, alpha=config.alpha) for r in ratings]
 
-    ratings = config.model.rate(ratings, scoreVals)
+    # Determine active racers (those without penalties) for rating calculation
+    active_mask = [p not in excusedPenalties for p in penalties]
+    active_ratings = [r for r, m in zip(ratings, active_mask) if m]
+    active_scores = [s for s, m in zip(scoreVals, active_mask) if m]
+
+    if len(active_ratings) < 2:
+        return
+
+    active_ratings = config.model.rate(active_ratings, active_scores)
+
+    # Reconstruct full ratings list with updates only for active racers
+    new_ratings = []
+    active_iter = iter(active_ratings)
+    for m in active_mask:
+        if m:
+            new_ratings.append(next(active_iter))
+        else:
+            new_ratings.append(ratings[len(new_ratings)])  # Keep old rating for penalized
+
+    ratings = new_ratings
 
     predictions = config.model.predict_rank(ratings)
 
     updateRatings(racers, ratings, pos, womens)
     
-    updateRaces(newRaces, scores, racers, scoreVals, predictions, partnerKeys, partnerNames, startingRating, ratings, teams, teamBoatNames, race, scoring, season, date, womens, regattaAvg, pos, config)
+    updateRaces(newRaces, venue, actualID, penalties, racers, scoreVals, predictions, partnerKeys, partnerNames, startingRating, ratings, teams, teamBoatNames, boatType, race, scoring, season, date, womens, regattaAvg, pos, config)

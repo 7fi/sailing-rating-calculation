@@ -20,7 +20,8 @@ class Config:
         'Emma Cole-Northeastern': 'emma-cole',
         'emma-cole-2026': 'emma-cole',
         'kaelyn-holmes-2029': 'kaelyn-holmes',
-        'Nathalie Caudron-Northeastern': 'nathalie-caudron'
+        'Nathalie Caudron-Northeastern': 'nathalie-caudron', 
+        'olivia-figley-2026': 'olivia-figley'
     }
     numTops : ClassVar[dict[str, int]] = {'open': 3, 'womens': 2}
     
@@ -30,6 +31,6 @@ class Config:
     
     sailorInfoFile = 'sailor_data2.parquet'
     
-    doScrape : bool = True
-    calcAll : bool = False
+    doScrape : bool = False
+    calcAll : bool = True
     doUpload : bool = True
