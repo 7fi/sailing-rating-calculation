@@ -1,6 +1,8 @@
 # %% Imports
-# %load_ext autoreload
-# %autoreload 2
+%load_ext autoreload
+%autoreload 2
+
+rootDir = "./../"
 
 from AsyncScraper import runFleetScrape
 from TRScraper import scrapeTR
@@ -263,8 +265,6 @@ def load(rootDir : str, config: Config):
 # %%
 def main(rootDir : str = "", jupyter = False):
     # %% Load Files
-    
-    # rootDir = "./../"
     
     config : Config = Config()
 

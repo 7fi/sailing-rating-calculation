@@ -361,9 +361,11 @@ def calculateSailorRanks(people : dict[str,Sailor], config : Config):
 
     # TODO: Count tr and fr seasons seperately
     eligible_skippers_tr = [p for p in people.values()
-                            if p.isRankEligible(config.targetTRSeasons, 'skipper', config.gradCutoff, False)]
+                            if p.isRankEligible(config.targetTRSeasons, 'skipper', config.gradCutoff, needsOutlinks=False)]
     eligible_crews_tr = [p for p in people.values()
-                         if p.isRankEligible(config.targetTRSeasons, 'crew', config.gradCutoff, False)]
+                         if p.isRankEligible(config.targetTRSeasons, 'crew', config.gradCutoff, needsOutlinks=False)]
+    
+    print(len(eligible_skippers_tr))
 
     for p in people.values():
         p.resetRanks()
