@@ -171,5 +171,3 @@ def uploadAllScores(allFrRows, allTrRows, connection, batch_size=10_000):
     
     # batch_insert("FleetScores", fleet_columns, allFrRows, connection, batch_size)
     # batch_insert("TRScores", team_columns, allTrRows, connection, batch_size)
-        
-    updateHomepageStats(connection)

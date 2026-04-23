@@ -1,8 +1,7 @@
 # %% Imports
-%load_ext autoreload
-%autoreload 2
-
-rootDir = "./../"
+# %load_ext autoreload
+# %autoreload 2
+# rootDir = "./../"
 
 from AsyncScraper import runFleetScrape
 from TRScraper import scrapeTR
@@ -13,7 +12,7 @@ from calculationsTR import calculateTR
 
 from chatRivals import buildRivals, uploadRivals
 
-from uploadScores import uploadScoresBySailor, uploadAllScores
+from uploadScores import uploadScoresBySailor, uploadAllScores, updateHomepageStats
 from Teams import uploadTeams
 
 from Sailors import Sailor, setupPeople, handleMerges, outputSailorsToFile, calculateSailorRanks, uploadSailors, updateSailorRatios
@@ -226,6 +225,7 @@ def upload(people : dict[str, Sailor], df_frAfter, df_trAfter, df_rivals, outlin
     uploadTeams(people, outlinks_dict, racecounts_dict, winp_dict, connection, config)
     uploadAllScores(df_frAfter, df_trAfter, connection)
     uploadRivals(df_rivals, connection)
+    updateHomepageStats(connection)
     
     connection.close()
     

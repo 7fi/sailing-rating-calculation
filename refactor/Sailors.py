@@ -394,10 +394,10 @@ def calculateSailorRanks(people : dict[str,Sailor], config : Config):
 
 def updateSailorRatios(people: dict[str, Sailor]):
     for key, p in people.items():
-        avgSkipperRatio = float(np.array(
-            [r['ratio'] for r in p.races if r['pos'].lower() == 'skipper' and 'ratio' in r.keys()]).mean())
-        avgCrewRatio = float(np.array(
-            [r['ratio'] for r in p.races if r['pos'].lower() == 'crew' and 'ratio' in r.keys()]).mean())
+        skipper_ratios = [r['ratio'] for r in p.races if r['pos'].lower() == 'skipper' and 'ratio' in r.keys() and not np.isnan(r['ratio'])]
+        crew_ratios = [r['ratio'] for r in p.races if r['pos'].lower() == 'crew' and 'ratio' in r.keys() and not np.isnan(r['ratio'])]
+        avgSkipperRatio = float(np.mean(skipper_ratios)) if skipper_ratios else 0.0
+        avgCrewRatio = float(np.mean(crew_ratios)) if crew_ratios else 0.0
         p.avgSkipperRatio = avgSkipperRatio
         p.avgCrewRatio = avgCrewRatio
 

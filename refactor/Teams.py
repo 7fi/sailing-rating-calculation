@@ -6,20 +6,9 @@ import numpy as np
 import mysql
 from Sailors import Sailor
 
-
-def validPerson(p : Sailor, pos, config: Config):
-    # if(p.hasTargetSeasons(config.targetSeasons, pos)):
-        # print(p.name, pos, p.hasTargetSeasons(config.targetSeasons, pos))
-    return (p.cross > 20
-            and p.outLinks > 70
-            and not p.hasTargetSeasons(config.targetSeasons, pos) # don't have to check this bc only using currentSailors
-            # and (2000 + int(p.year.split()[0]) > gradCutoff if isinstance(p.year, str) and len(p.year.split()) > 1 else int(p.year) > gradCutoff)
-            # and sum([p['raceCount'][seas] for seas in config.targetSeasons if seas in p['raceCount'].keys()]) > 5
-            )
-
 def getOrderedSailors(people : list[Sailor], ratingType, pos, outlinks_dict, config : Config):
     # print(ratingType)
-    numTops = config.numTops['open' if 'w' not in ratingType else 'womens']
+    numTops = config.numTops['tr' if 't' in ratingType else 'fr']['open' if 'w' not in ratingType else 'womens']
     isTR = 't' in ratingType
     outlinks_keys = outlinks_dict.keys()
     orderedSailors = sorted([p for p in people
@@ -29,11 +18,14 @@ def getOrderedSailors(people : list[Sailor], ratingType, pos, outlinks_dict, con
                             key=lambda x: getattr(x, ratingType).ordinal(
                                 target=config.targetElo, alpha=config.alpha),
                             reverse=True)
+    print(ratingType)
+    print(orderedSailors)
 
     sailorSum = sum([getattr(p, ratingType).ordinal(target=config.targetElo, alpha=config.alpha)
                             for p in orderedSailors[:numTops]])
     topSailors = [{'name': p.name, 'key': p.key,
                     ratingType: getattr(p, ratingType).ordinal(target=config.targetElo, alpha=config.alpha)} for p in orderedSailors[:numTops]]
+    print(topSailors)
     return topSailors, sailorSum
 
 def calculateTopSailors(filtered_people, outlinks_dict, isTeamRace, isWomens, config: Config):
@@ -43,7 +35,7 @@ def calculateTopSailors(filtered_people, outlinks_dict, isTeamRace, isWomens, co
     topSkippers, topSkippersSum = getOrderedSailors(filtered_people, prefix + 'sr', 'skipper', outlinks_dict, config)
     topCrews, topCrewsSum = getOrderedSailors(filtered_people, prefix + 'cr', 'crew', outlinks_dict, config)
 
-    numTops = config.numTops['open']
+    numTops = config.numTops['tr' if isTeamRace else 'fr']['open']
     topRating = (topSkippersSum + topCrewsSum) / (numTops * 2)
     return topRating, topSkippers, topCrews
 
@@ -56,7 +48,7 @@ def getRankType(sailor, season, topSailors, rankTypes, config: Config):
                     if rankType == '':
                         rankType = rt
                     else:
-                        rankType = rankType + '.' + rt
+                        rankType += '.' + rt
     return rankType
     
 def uploadSailorTeams(filtered_people : list[Sailor], team, topSkippers: list[list[dict]], topCrews: list[list[dict]], racecounts_dict, winp_dict, connection, config: Config):
@@ -73,9 +65,6 @@ def uploadSailorTeams(filtered_people : list[Sailor], team, topSkippers: list[li
                     rankType = getRankType(sailor, season, topSailors, rankTypes, config)
                     raceCount = racecounts_dict.get(sailor.key, {}).get(position.lower(), {}).get(season, 0)
                     winPercent = winp_dict.get((sailor.key, position, season), 0)
-                    
-                    if sailor.key == 'charles-wilkinson':
-                        print(season, position, winPercent)
                     
                     rows_to_insert.append((sailor.key,
                             team,
@@ -145,6 +134,8 @@ def calculateAvgRating(people : list[Sailor], config:Config):
     
 def uploadTeams(people: dict[str, Sailor], outlinks_dict, racecounts_dict, winp_dict, connection, config: Config):
     for team, region in teamRegions.items():
+        if team != 'Northeastern':
+            continue
         sailors : list[Sailor] = [p for key, p in people.items() if team in p.teams]
         currentSailors : list[Sailor] = [p for p in sailors if p.isOnTeamInSeasons(team, config.targetSeasons)]
         
@@ -155,8 +146,7 @@ def uploadTeams(people: dict[str, Sailor], outlinks_dict, racecounts_dict, winp_
         
         avg = calculateAvgRating(currentSailors, config)
         avgRatio = calculateAvgRatio(currentSailors, winp_dict)
-        print(team, avgRatio)
-        
+
         with connection.cursor() as cursor:
             cursor.execute("""
                 INSERT INTO Teams
