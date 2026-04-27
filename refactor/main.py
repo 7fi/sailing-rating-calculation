@@ -221,8 +221,8 @@ def upload(people : dict[str, Sailor], df_frAfter, df_trAfter, df_rivals, outlin
         allow_local_infile=True
     )
 
-    uploadSailors(people, connection, config)
-    uploadTeams(people, outlinks_dict, racecounts_dict, winp_dict, connection, config)
+    # uploadSailors(people, connection, config)
+    # uploadTeams(people, outlinks_dict, racecounts_dict, winp_dict, connection, config)
     uploadAllScores(df_frAfter, df_trAfter, connection)
     uploadRivals(df_rivals, connection)
     updateHomepageStats(connection)

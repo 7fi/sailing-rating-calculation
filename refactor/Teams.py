@@ -18,14 +18,11 @@ def getOrderedSailors(people : list[Sailor], ratingType, pos, outlinks_dict, con
                             key=lambda x: getattr(x, ratingType).ordinal(
                                 target=config.targetElo, alpha=config.alpha),
                             reverse=True)
-    print(ratingType)
-    print(orderedSailors)
 
     sailorSum = sum([getattr(p, ratingType).ordinal(target=config.targetElo, alpha=config.alpha)
                             for p in orderedSailors[:numTops]])
     topSailors = [{'name': p.name, 'key': p.key,
                     ratingType: getattr(p, ratingType).ordinal(target=config.targetElo, alpha=config.alpha)} for p in orderedSailors[:numTops]]
-    print(topSailors)
     return topSailors, sailorSum
 
 def calculateTopSailors(filtered_people, outlinks_dict, isTeamRace, isWomens, config: Config):
@@ -134,8 +131,6 @@ def calculateAvgRating(people : list[Sailor], config:Config):
     
 def uploadTeams(people: dict[str, Sailor], outlinks_dict, racecounts_dict, winp_dict, connection, config: Config):
     for team, region in teamRegions.items():
-        if team != 'Northeastern':
-            continue
         sailors : list[Sailor] = [p for key, p in people.items() if team in p.teams]
         currentSailors : list[Sailor] = [p for p in sailors if p.isOnTeamInSeasons(team, config.targetSeasons)]
         
