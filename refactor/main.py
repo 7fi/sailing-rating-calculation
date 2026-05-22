@@ -210,7 +210,7 @@ def calculateAllRaces(people, df_races, regatta_info, calculatedAtDict: dict, co
     
     return people, allFrRaces, allTrRaces
 
-def upload(people : dict[str, Sailor], df_frAfter, df_trAfter, df_rivals, outlinks_dict, racecounts_dict, winp_dict, config: Config):
+def upload(people : dict[str, Sailor], df_frAfter, df_trAfter, df_rivals, outlinks_dict, racecounts_dict, winp_dict, team_link_map, config: Config):
     # Create a connection
     connection = mysql.connector.connect(
         host=os.getenv('DB_HOST'),
@@ -221,8 +221,8 @@ def upload(people : dict[str, Sailor], df_frAfter, df_trAfter, df_rivals, outlin
         allow_local_infile=True
     )
 
-    # uploadSailors(people, connection, config)
-    # uploadTeams(people, outlinks_dict, racecounts_dict, winp_dict, connection, config)
+    uploadSailors(people, connection, config)
+    uploadTeams(people, outlinks_dict, racecounts_dict, winp_dict, team_link_map, connection, config)
     uploadAllScores(df_frAfter, df_trAfter, connection)
     uploadRivals(df_rivals, connection)
     updateHomepageStats(connection)
@@ -287,6 +287,10 @@ def main(rootDir : str = "", jupyter = False):
     
     del regatta_info
     
+    df_cleaned = df_races_full.dropna(
+        subset=['Team', 'Teamlink']).drop_duplicates(subset='Team', keep='first')
+    team_link_map = pd.Series(df_cleaned.Teamlink.values, index=df_cleaned.Team).to_dict()
+    
     people = calculateSailorRanks(people, config)
     updateSailorRatios(people)
     
@@ -327,7 +331,6 @@ def main(rootDir : str = "", jupyter = False):
     
     del counts
     
-    
     print("Calculations finished.\nOutputting to files")
     
     # %% File Output
@@ -340,15 +343,14 @@ def main(rootDir : str = "", jupyter = False):
     df_trAfter.to_parquet(rootDir + "postcalcTRraces.parquet")
     
     with open("calculated_at_dict.json", "w") as f:
-        json.dump(calculatedAtDict, f)
+        json.dump(calculatedAtDict, f) 
     
     print("File output finished.")
     
     # %% Upload data
     if config.doUpload:
-
         print("Uploading to db")
-        upload(people, df_frAfter, df_trAfter, df_rivals, outlinks_dict, racecounts_dict, winp_dict, config)
+        upload(people, df_frAfter, df_trAfter, df_rivals, outlinks_dict, racecounts_dict, winp_dict, team_link_map, config)
 
 # %% Main 
 if __name__ == "__main__":

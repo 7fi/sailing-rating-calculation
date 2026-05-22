@@ -21,7 +21,8 @@ class Config:
         'emma-cole-2026': 'emma-cole',
         'kaelyn-holmes-2029': 'kaelyn-holmes',
         'Nathalie Caudron-Northeastern': 'nathalie-caudron', 
-        'olivia-figley-2026': 'olivia-figley'
+        'olivia-figley-2026': 'olivia-figley',
+        'Winter vetrone-Northeastern': 'winter-vetrone'
     }
     numTops : ClassVar[dict[str, int]] = {'fr': {'open': 3, 'womens': 2}, 'tr': {'open': 3, 'womens': 3}}
     

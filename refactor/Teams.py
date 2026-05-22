@@ -7,7 +7,6 @@ import mysql
 from Sailors import Sailor
 
 def getOrderedSailors(people : list[Sailor], ratingType, pos, outlinks_dict, config : Config):
-    # print(ratingType)
     numTops = config.numTops['tr' if 't' in ratingType else 'fr']['open' if 'w' not in ratingType else 'womens']
     isTR = 't' in ratingType
     outlinks_keys = outlinks_dict.keys()
@@ -32,7 +31,7 @@ def calculateTopSailors(filtered_people, outlinks_dict, isTeamRace, isWomens, co
     topSkippers, topSkippersSum = getOrderedSailors(filtered_people, prefix + 'sr', 'skipper', outlinks_dict, config)
     topCrews, topCrewsSum = getOrderedSailors(filtered_people, prefix + 'cr', 'crew', outlinks_dict, config)
 
-    numTops = config.numTops['tr' if isTeamRace else 'fr']['open']
+    numTops = config.numTops['tr' if isTeamRace else 'fr']['womens' if isWomens else 'open']
     topRating = (topSkippersSum + topCrewsSum) / (numTops * 2)
     return topRating, topSkippers, topCrews
 
@@ -58,18 +57,20 @@ def uploadSailorTeams(filtered_people : list[Sailor], team, topSkippers: list[li
     for sailor in filtered_people:
         for position, topSailors, rankTypes in zip(['skipper', 'crew'], [topSkippers, topCrews], [rankTypesSkipper, rankTypesCrew]):
             for season, seasonTeam in sailor.seasons[position]:
-                if seasonTeam == team: # Only insert if sailor was actually on this team in this season
-                    rankType = getRankType(sailor, season, topSailors, rankTypes, config)
-                    raceCount = racecounts_dict.get(sailor.key, {}).get(position.lower(), {}).get(season, 0)
-                    winPercent = winp_dict.get((sailor.key, position, season), 0)
-                    
-                    rows_to_insert.append((sailor.key,
-                            team,
-                            season,
-                            position,
-                            raceCount,
-                            winPercent,
-                            rankType))
+                if seasonTeam != team: # Only insert if sailor was actually on this team in this season
+                    continue
+                
+                rankType = getRankType(sailor, season, topSailors, rankTypes, config)
+                raceCount = racecounts_dict.get(sailor.key, {}).get(position.lower(), {}).get(season, 0)
+                winPercent = winp_dict.get((sailor.key, position, season), 0)
+                
+                rows_to_insert.append((sailor.key,
+                        team,
+                        season,
+                        position,
+                        raceCount,
+                        winPercent,
+                        rankType))
 
     # Insert in batches
     for start in range(0, len(rows_to_insert), batch_size):
@@ -129,8 +130,10 @@ def calculateAvgRating(people : list[Sailor], config:Config):
 
     return sum(ratings) / len(ratings) if len(ratings) > 0 else 0
     
-def uploadTeams(people: dict[str, Sailor], outlinks_dict, racecounts_dict, winp_dict, connection, config: Config):
+def uploadTeams(people: dict[str, Sailor], outlinks_dict, racecounts_dict, winp_dict, team_link_map, connection, config: Config):
     for team, region in teamRegions.items():
+        # if team != 'Northeastern':
+        #     continue
         sailors : list[Sailor] = [p for key, p in people.items() if team in p.teams]
         currentSailors : list[Sailor] = [p for p in sailors if p.isOnTeamInSeasons(team, config.targetSeasons)]
         
@@ -141,13 +144,14 @@ def uploadTeams(people: dict[str, Sailor], outlinks_dict, racecounts_dict, winp_
         
         avg = calculateAvgRating(currentSailors, config)
         avgRatio = calculateAvgRatio(currentSailors, winp_dict)
+        link = team_link_map.get(team, '')
 
         with connection.cursor() as cursor:
             cursor.execute("""
                 INSERT INTO Teams
-                    (teamID, teamName, topFleetRating, topWomenRating, topTeamRating,
+                    (teamID, teamName, link, topFleetRating, topWomenRating, topTeamRating,
                     topWomenTeamRating, avgRating, avgRatio, region)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 ON DUPLICATE KEY UPDATE
                     topFleetRating = VALUES(topFleetRating),
                     topWomenRating = VALUES(topWomenRating),
@@ -155,7 +159,7 @@ def uploadTeams(people: dict[str, Sailor], outlinks_dict, racecounts_dict, winp_
                     topWomenTeamRating = VALUES(topWomenTeamRating),
                     avgRating = VALUES(avgRating),
                     avgRatio = VALUES(avgRatio)
-            """, (team, team, topRating, topWomenRating, topRatingTR,
+            """, (team, team, link, topRating, topWomenRating, topRatingTR,
                 topWomenRatingTR, avg, avgRatio, region))
         connection.commit()
 

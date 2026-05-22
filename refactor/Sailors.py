@@ -108,8 +108,8 @@ class Sailor:
             return False
         
         return (self.hasTargetSeasons(targetSeasons, pos) # has target seasons
-                        and (outLinks > 70 if outLinks is not None and needsOutlinks else True) # and has 70 outlinks   
-                        and betterYear > gradCutoff) # and graduates after the cutoff
+                        and (outLinks > 70 if outLinks is not None and needsOutlinks else True)) # and has 70 outlinks   
+                        # and betterYear > gradCutoff) # and graduates after the cutoff
         
     def resetRanks(self):
         self.skipperRank = 0
