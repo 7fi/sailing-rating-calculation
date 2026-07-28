@@ -88,13 +88,17 @@ gradCutoff = 2025
 calc_all = True
 
 merges = {'carter-anderson-2027': 'carter-anderson',
-          'elliott-bates-2021': 'elliott-bates',
-          'ian-hopkins-guerra-2026': 'ian-hopkins-guerra',
-          'connor-nelson-2024': 'connor-nelson', 
-          'Gavin Hudson-Northeastern': 'gavin-hudson', 
-          'Jeremy Bullock-Northeastern': 'jeremy-bullock',
-          'Emma Cole-Northeastern': 'emma-cole', 
-          'emma-cole-2026': 'emma-cole',}
+        'elliott-bates-2021': 'elliott-bates',
+        'ian-hopkins-guerra-2026': 'ian-hopkins-guerra',
+        'connor-nelson-2024': 'connor-nelson',
+        'Gavin Hudson-Northeastern': 'gavin-hudson',
+        'Jeremy Bullock-Northeastern': 'jeremy-bullock',
+        'Emma Cole-Northeastern': 'emma-cole',
+        'emma-cole-2026': 'emma-cole',
+        'kaelyn-holmes-2029': 'kaelyn-holmes',
+        'Nathalie Caudron-Northeastern': 'nathalie-caudron', 
+        'olivia-figley-2026': 'olivia-figley',
+        'Winter vetrone-Northeastern': 'winter-vetrone'}
 
 
 def setupPeople(df_sailor_ratings, df_sailor_info):
