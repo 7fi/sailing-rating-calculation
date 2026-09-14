@@ -7,9 +7,9 @@ class Config:
     targetElo : int = 1000
     model: PlackettLuce = field(default_factory=lambda: PlackettLuce(beta=25.0/120.0))
     alpha : float = 200 / (25.0 / 3.0)
-    targetSeasons : ClassVar[list[str]] = ['f25', 's26']
+    targetSeasons : ClassVar[list[str]] = ['s26', 'f26']
     targetTRSeasons : ClassVar[list[str]] = ['s26']
-    gradCutoff : int = 2025
+    gradCutoff : int = 2026
     merges: ClassVar[dict[str, str]] = {
         'carter-anderson-2027': 'carter-anderson',
         'elliott-bates-2021': 'elliott-bates',

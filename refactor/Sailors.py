@@ -108,8 +108,8 @@ class Sailor:
             return False
         
         return (self.hasTargetSeasons(targetSeasons, pos) # has target seasons
-                        and (outLinks > 70 if outLinks is not None and needsOutlinks else True)) # and has 70 outlinks   
-                        # and betterYear > gradCutoff) # and graduates after the cutoff
+                        and (outLinks > 70 if outLinks is not None and needsOutlinks else True) # and has 70 outlinks   
+                        and betterYear > gradCutoff) # and graduates after the cutoff
         
     def resetRanks(self):
         self.skipperRank = 0
@@ -432,9 +432,9 @@ def uploadSailors(people, connection, config : Config, batch_size=300):
                     INSERT INTO Sailors (
                         sailorID, name, gender, sr, cr, wsr, wcr, tsr, tcr, wtsr, wtcr,
                         sRank, cRank, wsRank, wcRank, tsRank, tcRank, wtsRank, wtcRank,
-                        avgSkipperRatio, avgCrewRatio, year
+                        avgSkipperRatio, avgCrewRatio, year, crossLinks, outLinks,
                     )
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     ON DUPLICATE KEY UPDATE
                         sr = VALUES(sr),
                         cr = VALUES(cr),
@@ -453,7 +453,9 @@ def uploadSailors(people, connection, config : Config, batch_size=300):
                         wtsRank = VALUES(wtsRank),
                         wtcRank = VALUES(wtcRank),
                         avgSkipperRatio = VALUES(avgSkipperRatio),
-                        avgCrewRatio = VALUES(avgCrewRatio)
+                        avgCrewRatio = VALUES(avgCrewRatio),
+                        crossLinks = VALUES(crossLinks),
+                        outLinks = VALUES(outLinks),
                 """
     sailorTeamsSQL = """
                             INSERT INTO SailorTeams(sailorID, teamID, season, position, raceCount)
@@ -492,6 +494,8 @@ def uploadSailors(people, connection, config : Config, batch_size=300):
             int(p.womenCrewRankTR),
             avg_sk,
             avg_cr,
+            int(p.cross),
+            int(p.outLinks),
             p.year
         ))
         
@@ -520,7 +524,10 @@ def uploadSailors(people, connection, config : Config, batch_size=300):
         if (i + 1) % batch_size == 0:
             print(f"Uploading sailors {i - batch_size + 1} to {i}...", len(sailor_teams_rows))
             with connection.cursor() as cursor:
-                cursor.executemany(sailorSQL, sailor_rows)
+                try :
+                    cursor.executemany(sailorSQL, sailor_rows)
+                except:
+                    print(f"sailorSQL", sailor_rows)
             sailor_rows.clear()
             
             if sailor_teams_rows:
