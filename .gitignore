@@ -15,3 +15,7 @@
 /lib64
 *.cfg
 .DS_Store
+*.pyc
+*.parquet
+*.cpython-313.pyc
+.env

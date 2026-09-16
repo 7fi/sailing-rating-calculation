@@ -88,13 +88,17 @@ gradCutoff = 2025
 calc_all = True
 
 merges = {'carter-anderson-2027': 'carter-anderson',
-          'elliott-bates-2021': 'elliott-bates',
-          'ian-hopkins-guerra-2026': 'ian-hopkins-guerra',
-          'connor-nelson-2024': 'connor-nelson', 
-          'Gavin Hudson-Northeastern': 'gavin-hudson', 
-          'Jeremy Bullock-Northeastern': 'jeremy-bullock',
-          'Emma Cole-Northeastern': 'emma-cole', 
-          'emma-cole-2026': 'emma-cole',}
+        'elliott-bates-2021': 'elliott-bates',
+        'ian-hopkins-guerra-2026': 'ian-hopkins-guerra',
+        'connor-nelson-2024': 'connor-nelson',
+        'Gavin Hudson-Northeastern': 'gavin-hudson',
+        'Jeremy Bullock-Northeastern': 'jeremy-bullock',
+        'Emma Cole-Northeastern': 'emma-cole',
+        'emma-cole-2026': 'emma-cole',
+        'kaelyn-holmes-2029': 'kaelyn-holmes',
+        'Nathalie Caudron-Northeastern': 'nathalie-caudron', 
+        'olivia-figley-2026': 'olivia-figley',
+        'Winter vetrone-Northeastern': 'winter-vetrone'}
 
 
 def setupPeople(df_sailor_ratings, df_sailor_info):
@@ -340,7 +344,9 @@ def calculateFR(people, date, regatta, race, row, type, scoring, season, residua
                   else people[name + "-" + team] for key, name, team in zip(keys, names, teams)]
     except Exception as e:
         print(regatta)
-        raise e
+        print(e)
+        # raise e
+        return
 
     # Check for womens regatta
     partnerKeys = scores['PartnerLink']
@@ -1482,9 +1488,15 @@ if __name__ == "__main__":
     if doCalc:
         people = main(df_sailor_ratings, df_sailor_info)
         people, df_sailors = postCalcAdjust(people)
+    if doCalc:
+        people = main(df_sailor_ratings, df_sailor_info)
+        people, df_sailors = postCalcAdjust(people)
 
     if doUpload:
         uploadSailors(people)
+        teams = uploadTeams(df_sailors)
+        uploadTops(people)
+        uploadAllSailors(people)
         teams = uploadTeams(df_sailors)
         uploadTops(people)
         uploadAllSailors(people)
