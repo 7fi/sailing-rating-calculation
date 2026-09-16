@@ -16,7 +16,7 @@ with sync_playwright() as p:
         page = browser.new_page()
         
         teamLink = df_races.loc[df_races['Team'] == team, 'Teamlink'].iloc[0]
-        url = f"https://scores.collegesailing.org/schools/{teamLink.split("/")[2]}"
+        url = f"https://scores.collegesailing.org/schools/{teamLink}"
 
         # Go to the page
         page.goto(url)

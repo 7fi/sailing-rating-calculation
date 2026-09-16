@@ -3,6 +3,17 @@
 /sailorPages
 /pages
 /pagesTR
+*.pyc
+*.pyc
+.env
+*.DS_Store
+*.parquet
+*.html
+/bin
+/include
+/lib
+/lib64
+*.cfg
 .DS_Store
 *.pyc
 *.parquet

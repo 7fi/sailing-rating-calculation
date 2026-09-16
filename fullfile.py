@@ -79,8 +79,8 @@ db = firestore.client()
 model = PlackettLuce(beta=25.0/120.0)
 targetElo = 1000
 
-targetSeasons = ['f25']
-targetTRSeasons = ['s25']
+targetSeasons = ['s26']
+targetTRSeasons = ['s26']
 gradCutoff = 2025
 # baseSigma = baseElo // 3
 # offset = baseElo * 2
@@ -1477,7 +1477,7 @@ if __name__ == "__main__":
     if not calc_all:
         cutoff = (datetime.now() - timedelta(weeks=2))
         df_races_full = df_races_full.loc[df_races_full['date'] > cutoff]
-        df_sailor_ratings = pd.read_json("sailors-latest-fullfile.json")
+        df_sailor_ratings = pd.read_json("sailors-latest.json")
         # df_sailor_ratings = pd.read_json("sailors-20250424.json")
 
     if doScrape:
@@ -1488,9 +1488,15 @@ if __name__ == "__main__":
     if doCalc:
         people = main(df_sailor_ratings, df_sailor_info)
         people, df_sailors = postCalcAdjust(people)
+    if doCalc:
+        people = main(df_sailor_ratings, df_sailor_info)
+        people, df_sailors = postCalcAdjust(people)
 
     if doUpload:
         uploadSailors(people)
+        teams = uploadTeams(df_sailors)
+        uploadTops(people)
+        uploadAllSailors(people)
         teams = uploadTeams(df_sailors)
         uploadTops(people)
         uploadAllSailors(people)
