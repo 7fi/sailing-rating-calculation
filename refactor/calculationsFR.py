@@ -126,17 +126,20 @@ def calculateFR(newRaces : list, people : dict[str, Sailor], resetDate, date, re
     keys = scores['key']  # the sailor keys
     names = scores['Sailor']
     
-    partnerKeys = scores['PartnerLink']
-    partnerKeys = [pk if pk not in config.merges.keys() else config.merges[pk] for pk in partnerKeys]
-    partnerNames = scores['Partner']
     
     teams = scores['Team']  # the sailors team
     teamBoatNames = scores['TeamBoatName']  # the sailors team
     scoreVals = list(scores['Score'])  # the score values
-    penalties = list(scores['penalty'])
     
+    penalties = list(scores['penalty'])
     excusedPenalties = ["DNS", "BKD", "RDG", "BYE"]
-
+    
+    partnerKeys = scores['PartnerLink']
+    partnerKeys = [pk if pk not in config.merges.keys() else config.merges[pk] for pk in partnerKeys] # handle merges
+    partnerNames = scores['Partner']
+    if "Unknown" in partnerKeys:
+        partnerKeys = [pk if pk != "Unknown" else f"{pn}-{team}" for pk, pn, team in zip(partnerKeys, partnerNames, teams)]
+    
     # check for invalid race conditions
     if len(keys) < 2:  # less than two sailors
         return

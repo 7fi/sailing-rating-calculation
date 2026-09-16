@@ -107,8 +107,11 @@ class Sailor:
             print(f"error happened to {self.key}")
             return False
         
+        if outLinks == None:
+            outLinks = self.outLinks
+        
         return (self.hasTargetSeasons(targetSeasons, pos) # has target seasons
-                        and (outLinks > 70 if outLinks is not None and needsOutlinks else True) # and has 70 outlinks   
+                        and (outLinks > 150 if needsOutlinks else True) # and has x outlinks   
                         and betterYear > gradCutoff) # and graduates after the cutoff
         
     def resetRanks(self):
@@ -432,7 +435,7 @@ def uploadSailors(people, connection, config : Config, batch_size=300):
                     INSERT INTO Sailors (
                         sailorID, name, gender, sr, cr, wsr, wcr, tsr, tcr, wtsr, wtcr,
                         sRank, cRank, wsRank, wcRank, tsRank, tcRank, wtsRank, wtcRank,
-                        avgSkipperRatio, avgCrewRatio, year, crossLinks, outLinks,
+                        avgSkipperRatio, avgCrewRatio, crossLinks, outLinks, year
                     )
                     VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     ON DUPLICATE KEY UPDATE
@@ -455,7 +458,7 @@ def uploadSailors(people, connection, config : Config, batch_size=300):
                         avgSkipperRatio = VALUES(avgSkipperRatio),
                         avgCrewRatio = VALUES(avgCrewRatio),
                         crossLinks = VALUES(crossLinks),
-                        outLinks = VALUES(outLinks),
+                        outLinks = VALUES(outLinks)
                 """
     sailorTeamsSQL = """
                             INSERT INTO SailorTeams(sailorID, teamID, season, position, raceCount)
@@ -526,8 +529,9 @@ def uploadSailors(people, connection, config : Config, batch_size=300):
             with connection.cursor() as cursor:
                 try :
                     cursor.executemany(sailorSQL, sailor_rows)
-                except:
+                except Exception as e:
                     print(f"sailorSQL", sailor_rows)
+                    raise e
             sailor_rows.clear()
             
             if sailor_teams_rows:

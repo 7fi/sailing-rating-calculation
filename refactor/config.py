@@ -25,6 +25,7 @@ class Config:
         'Winter vetrone-Northeastern': 'winter-vetrone'
     }
     numTops : ClassVar[dict[str, int]] = {'fr': {'open': 3, 'womens': 2}, 'tr': {'open': 3, 'womens': 3}}
+    requiredOutLinks : int = 120
     
     frfile = 'racesfrtest.parquet'
     trfile = 'racesTR.parquet'
