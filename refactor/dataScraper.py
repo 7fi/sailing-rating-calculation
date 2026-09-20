@@ -9,6 +9,7 @@ import numpy as np
 import time
 import os
 from concurrent.futures import ProcessPoolExecutor
+from pageCache import readPage, writePage
 
 async def cleanup_semaphore(semaphore):
     if semaphore.locked():
@@ -21,17 +22,15 @@ async def fetchData(client, semaphore, link):
     backoff = 1
     broken_links = ['catherine-lindsay', 'francis-humphrey', 'gabriel-gabe-morreale', 'henriette-smith', 'iona-deacon', 'jason-case-pittsburgh', 'jewel-min-min-kelly', 'race-nicolia', 'showtime', 'gabriel-gabe-morreale-2028']
     if link not in broken_links and os.path.exists(f"sailorPages/{link}.html"):
-        with open(f"sailorPages/{link}.html", "r") as f:
-            sailorPage = BeautifulSoup(f.read(), 'html.parser')
+        sailorPage = BeautifulSoup(readPage(f"sailorPages/{link}.html"), 'html.parser')
     else:
         for attempt in range(retries):
             try:
                 async with semaphore:  # Limit concurrent requests
                     url = f"https://scores.collegesailing.org/sailors/{link}/"
                     page = await client.get(url)
-                    with open(f"sailorPages/{link}.html", "w") as f:
-                        f.write(str(page.content))
-                    sailorPage = BeautifulSoup(page.content, 'html.parser')
+                    writePage(f"sailorPages/{link}.html", page)
+                    sailorPage = BeautifulSoup(page.text, 'html.parser')
                     page.raise_for_status()  # Raise HTTPError for bad responses (4xx, 5xx)
 
             except httpx.ConnectTimeout as e:
@@ -191,5 +190,5 @@ def runSailorData(frfile, trfile, oldDataFile, outfile):
     return df_people
 
 if __name__ == "__main__":
-    runSailorData("racesfrtest.parquet", "trSailorInfoAll.json", "sailor_data2.parquet", "sailor_data2.parquet")
+    runSailorData("racesfr.parquet", "trSailorInfoAll.json", "sailor_data2.parquet", "sailor_data2.parquet")
     # runSailorData("racesfrtest.json", "trSailorInfoAll.json", "sailor_data2.json", "sailor_data2.parquet")

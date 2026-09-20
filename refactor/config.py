@@ -27,7 +27,8 @@ class Config:
     numTops : ClassVar[dict[str, int]] = {'fr': {'open': 3, 'womens': 2}, 'tr': {'open': 3, 'womens': 3}}
     requiredOutLinks : int = 120
     
-    frfile = 'racesfrtest.parquet'
+    # frfile = 'racesfrtest.parquet'
+    frfile = 'racesfr.parquet'
     trfile = 'racesTR.parquet'
     trSailorInfoFile = 'trSailorinfoAll.json'
     

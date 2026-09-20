@@ -1,4 +1,5 @@
 from Sailors import Sailor
+import csv
 import io
 import tempfile
 import pandas as pd
@@ -149,10 +150,23 @@ def uploadAllScores(allFrRows, allTrRows, connection, batch_size=10_000):
                                       ['FleetScores', 'TRScores'], [fleet_columns, team_columns]):
         upload_df = upload_df.reindex(columns=cols)
         upload_df['date'] = pd.to_datetime(upload_df['date'], unit='s')
-        
+
+        # na_rep below writes \N, which LOAD DATA only reads as NULL while it is left
+        # unescaped. QUOTE_NONE escaping would turn it into the literal string "\N", so
+        # refuse rather than quietly writing that.
+        nullCols = [c for c in cols if upload_df[c].isna().any()]
+        if nullCols:
+            raise ValueError(f"Null values in {table} columns {nullCols}; LOAD DATA cannot represent them here")
+
         with tempfile.NamedTemporaryFile(mode='w+', suffix='.csv', delete=True) as temp_file:
-            # Ensure you use a tab separator to avoid comma-conflicts in names
-            upload_df.to_csv(temp_file.name, index=False, header=False, sep='\t', na_rep='\\N', encoding='utf-8')
+            # Tab separated, and escaped the way LOAD DATA reads it by default: backslash
+            # escapes, no quoting. pandas' default QUOTE_MINIMAL disagrees on both counts -
+            # it wraps a field containing a quote in quotes that LOAD DATA does not strip
+            # (so Tyler "TMAC" Macdonald landed in the DB as "Tyler ""TMAC"" Macdonald"),
+            # and it leaves backslashes unescaped for LOAD DATA to swallow (so O\'Connell
+            # became O'Connell). QUOTE_NONE with escapechar makes the two sides agree.
+            upload_df.to_csv(temp_file.name, index=False, header=False, sep='\t', na_rep='\\N',
+                             encoding='utf-8', quoting=csv.QUOTE_NONE, escapechar='\\')
             temp_file.flush() # Ensure all data is written to disk
 
             # 3. The SQL Command

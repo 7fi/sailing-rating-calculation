@@ -233,12 +233,12 @@ def load(rootDir : str, config: Config):
     load_dotenv()
     
     if config.doScrape:
-        df_races_fr = runFleetScrape("racesfrtest.parquet", "racesfrtest.parquet") 
+        df_races_fr = runFleetScrape("racesfr.parquet", "racesfr.parquet") 
         df_races_tr = scrapeTR("racesTR.parquet", "racesTR.parquet", "trSailorInfoAll.json")
-        df_sailor_info = runSailorData("racesfrtest.parquet", "trSailorInfoAll.json", "sailor_data2.parquet", "sailor_data2.parquet")
+        df_sailor_info = runSailorData("racesfr.parquet", "trSailorInfoAll.json", "sailor_data2.parquet", "sailor_data2.parquet")
     else: 
         print("Reading from files.")
-        df_races_fr = pd.read_parquet(rootDir + "racesfrtest.parquet")
+        df_races_fr = pd.read_parquet(rootDir + "racesfr.parquet")
         df_races_tr = pd.read_parquet(rootDir + "racesTR.parquet")
         df_sailor_info = pd.read_parquet(rootDir + "sailor_data2.parquet")
         

@@ -604,4 +604,4 @@ def runFleetScrape(loadfile, outfile):
     return df_races
 
 if __name__ == "__main__":
-    runFleetScrape("racesfrtest2.parquet", "racesfrtest.parquet")
+    runFleetScrape("racesfr.parquet", "racesfr.parquet")

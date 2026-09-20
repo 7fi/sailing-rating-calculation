@@ -45,7 +45,7 @@ def updateCrossLinks(sailor, isCross, regions, race, config : Config):
     
     return outLinks
 
-def updateRaces(newRaces, venue, actualID, penalties, racers : list[Sailor], scoreVals, predictions, partnerKeys, partnerNames, startingRating, ratings, teams, teamBoatNames, boatType, race, scoring, season, date, womens, regattaAvg, pos, config : Config):
+def updateRaces(newRaces, venue, actualIDs, penalties, racers : list[Sailor], scoreVals, predictions, partnerKeys, partnerNames, startingRating, ratings, teams, teamBoatNames, boatType, race, scoring, season, date, womens, regattaAvg, pos, config : Config):
     if pos.lower() not in ['skipper', 'crew']:
         print("Pos is weird value in updateRaces ", pos)
 
@@ -58,7 +58,7 @@ def updateRaces(newRaces, venue, actualID, penalties, racers : list[Sailor], sco
     isCross = True if len(set(regions)) > 1 else False
 
     # Loop through each sailor and the associated values
-    for sailor, score, penalty, pred, partnerKey, partnerName, oldRating, new_rating, team, teamBoatName in zip(racers, scoreVals, penalties, predictions, partnerKeys, partnerNames, startingRating, ratings, teams, teamBoatNames):
+    for sailor, actualID, score, penalty, pred, partnerKey, partnerName, oldRating, new_rating, team, teamBoatName in zip(racers, actualIDs, scoreVals, penalties, predictions, partnerKeys, partnerNames, startingRating, ratings, teams, teamBoatNames):
 
         outLinks = updateCrossLinks(sailor, isCross, regions, race, config)
 
@@ -148,7 +148,10 @@ def calculateFR(newRaces : list, people : dict[str, Sailor], resetDate, date, re
     
     boatType = scores['Boat'].iat[0]
     venue = scores['Venue'].iat[0]
-    actualID = scores['raceID'].iat[0]
+    # Races are grouped by adjusted_raceID, which drops the division for Combined
+    # scoring, so one group can span A/B/C. Keep each sailor's own raceID instead of
+    # the first row's, or every sailor gets recorded in the first row's division.
+    actualIDs = list(scores['raceID'])
 
     racers : list[Sailor] = getRacers(people, names, keys, teams, regatta, resetDate, date, ratingType)
 
@@ -181,4 +184,4 @@ def calculateFR(newRaces : list, people : dict[str, Sailor], resetDate, date, re
 
     updateRatings(racers, ratings, pos, womens)
     
-    updateRaces(newRaces, venue, actualID, penalties, racers, scoreVals, predictions, partnerKeys, partnerNames, startingRating, ratings, teams, teamBoatNames, boatType, race, scoring, season, date, womens, regattaAvg, pos, config)
+    updateRaces(newRaces, venue, actualIDs, penalties, racers, scoreVals, predictions, partnerKeys, partnerNames, startingRating, ratings, teams, teamBoatNames, boatType, race, scoring, season, date, womens, regattaAvg, pos, config)

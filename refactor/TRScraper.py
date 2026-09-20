@@ -5,6 +5,7 @@ import numpy as np
 from datetime import date
 from datetime import date, datetime
 import os
+from pageCache import readPage, writePage
 
 def makeRaceList(raceRows):
   raceList = []
@@ -364,33 +365,27 @@ def setup(infile):
       if os.path.exists(f"pagesTR/{link}-allraces.html") and os.path.exists(f"pagesTR/{link}-sailors.html") and os.path.exists(f"pagesTR/{link}-report.html") and not rescrape:
           if i % 50 == 0:
               print(f"({i + 1}/{len(list(regattas.values()))}) getting soup from file for {regattaID}")
-          with open(f"pagesTR/{link}-allraces.html", "r") as f:
-              allRaces = BeautifulSoup(f.read(), 'html.parser')
-          with open(f"pagesTR/{link}-sailors.html", "r") as f:
-              sailors = BeautifulSoup(f.read(), 'html.parser')
-          with open(f"pagesTR/{link}-report.html", "r") as f:
-              report = BeautifulSoup(f.read(), 'html.parser')
+          allRaces = BeautifulSoup(readPage(f"pagesTR/{link}-allraces.html"), 'html.parser')
+          sailors = BeautifulSoup(readPage(f"pagesTR/{link}-sailors.html"), 'html.parser')
+          report = BeautifulSoup(readPage(f"pagesTR/{link}-report.html"), 'html.parser')
       else:
           print(f"({i + 1}/{len(list(regattas.values()))}) getting soup for {regattaID}")
           # all races
           url = f"https://scores.collegesailing.org/{regatta['link']}/all/"
           page = requests.get(url)
-          with open(f"pagesTR/{link}-allraces.html", "w") as f:
-                          f.write(str(page.content))
-          allRaces = BeautifulSoup(page.content, 'html.parser')
+          writePage(f"pagesTR/{link}-allraces.html", page)
+          allRaces = BeautifulSoup(page.text, 'html.parser')
 
           # sailors
           url = f"https://scores.collegesailing.org/{regatta['link']}/sailors/"
           page = requests.get(url)
-          with open(f"pagesTR/{link}-sailors.html", "w") as f:
-                          f.write(str(page.content))
-          sailors = BeautifulSoup(page.content, 'html.parser')
-          
+          writePage(f"pagesTR/{link}-sailors.html", page)
+          sailors = BeautifulSoup(page.text, 'html.parser')
+
           url = f"https://scores.collegesailing.org/{regatta['link']}/"
           page = requests.get(url)
-          with open(f"pagesTR/{link}-report.html", "w") as f:
-                          f.write(str(page.content))
-          report = BeautifulSoup(page.content, 'html.parser')
+          writePage(f"pagesTR/{link}-report.html", page)
+          report = BeautifulSoup(page.text, 'html.parser')
       
       regattaSoups[regattaID] = {"allRaces": allRaces, "sailors": sailors, 'report': report, "scoring": regatta['scoring']}
       
