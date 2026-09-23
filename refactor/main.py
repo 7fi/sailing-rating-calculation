@@ -15,7 +15,7 @@ from chatRivals import buildRivals, uploadRivals
 from uploadScores import uploadScoresBySailor, uploadAllScores, updateHomepageStats
 from Teams import uploadTeams
 
-from Sailors import Sailor, setupPeople, handleMerges, outputSailorsToFile, calculateSailorRanks, uploadSailors, updateSailorRatios
+from Sailors import Sailor, setupPeople, handleMerges, outputSailorsToFile, calculateSailorRanks, uploadSailors, updateSailorRatios, loadWHRRatings, applyWHRToRaces
 from config import Config
 
 import pandas as pd
@@ -145,7 +145,8 @@ def calcAllRacesForRT(ratingType, people, df_races, allFrRaces, allTrRaces, calc
     i = 0
     canSkipCalc = not config.calcAll
     resetDate = None
-    
+    seasonsCalculated = {}
+
     for regatta_name, regatta_data in regatta_groups:
         season = regatta_data.iloc[0]['raceID'].split("/")[0]
         scoring = regatta_data.iloc[0]['scoring']
@@ -169,10 +170,19 @@ def calcAllRacesForRT(ratingType, people, df_races, allFrRaces, allTrRaces, calc
                 continue
 
         race_groups = regatta_data.groupby(['adjusted_raceID'], sort=False)
-        
-        calculatedAtDict[season] = time.time()
-        
-        if scoring == 'team':
+
+        # Record the season as calculated in a per-rating-type staging dict. Writing
+        # straight into calculatedAtDict here meant the first of the four rating-type
+        # passes stamped every season, so the wfr/tr/wtr passes then saw
+        # calculatedAt > updatedAt and skipped all of their work.
+        seasonsCalculated[season] = time.time()
+
+        # regAvg is recomputed from the joint fit in whr.runFleetPipeline and written
+        # onto the rows by applyWHRToRaces, so there is no need to derive it from
+        # openskill ratings here.
+        if not config.runOpenskill:
+            regattaAvg = 0.0
+        elif scoring == 'team':
             regattaAvg = getRegAvgTR(people, womens,regatta_data, config)
         else: 
             regattaAvg = getRegAvgFR(people, womens,regatta_data, config)
@@ -189,8 +199,8 @@ def calcAllRacesForRT(ratingType, people, df_races, allFrRaces, allTrRaces, calc
                     calculateTR(allTrRaces, people, resetDate, date, row, pos, season, regattaAvg, womens, config)
                 else:
                     calculateFR(allFrRaces, people, resetDate, date, regatta_name, raceID[0], row, pos, scoring, season, regattaAvg, womens, ratingType, config)
-    return people, allFrRaces, allTrRaces
-    
+    return people, allFrRaces, allTrRaces, seasonsCalculated
+
 def calculateAllRaces(people, df_races, regatta_info, calculatedAtDict: dict, config: Config):
     allFrRaces = []
     allTrRaces = []
@@ -198,16 +208,27 @@ def calculateAllRaces(people, df_races, regatta_info, calculatedAtDict: dict, co
     df_regatta_info = pd.DataFrame(regatta_info).T
     df_regatta_info = df_regatta_info.reset_index().rename(columns={'level_0': 'Regatta'})
 
+    # Merge the region/womens info once rather than re-deriving it from the full frame
+    # inside every rating-type iteration.
+    df_races_merged = df_races.merge(
+        df_regatta_info,
+        on='Regatta',
+        how='inner'
+    )
+
+    # A season counts as calculated only once EVERY rating type has swept it, so the
+    # per-pass results are collected here and folded in afterwards.
+    calculatedPerType = []
     for rt in ['fr', 'wfr', 'tr', 'wtr']:
-        df_races_filtered = df_races.merge(
-            df_regatta_info,
-            on='Regatta',
-            how='inner'
-        )
-        df_races_filtered = df_races_filtered[df_races_filtered['ratingType'] == rt]
-                
-        people, allFrRaces, allTrRaces = calcAllRacesForRT(rt, people, df_races_filtered, allFrRaces, allTrRaces, calculatedAtDict, config)
-    
+        df_races_filtered = df_races_merged[df_races_merged['ratingType'] == rt]
+
+        people, allFrRaces, allTrRaces, seasonsCalculated = calcAllRacesForRT(rt, people, df_races_filtered, allFrRaces, allTrRaces, calculatedAtDict, config)
+        calculatedPerType.append(seasonsCalculated)
+
+    for season in set().union(*[set(d.keys()) for d in calculatedPerType]):
+        stamps = [d[season] for d in calculatedPerType if season in d]
+        calculatedAtDict[season] = min(stamps)
+
     return people, allFrRaces, allTrRaces
 
 def upload(people : dict[str, Sailor], df_frAfter, df_trAfter, df_rivals, outlinks_dict, racecounts_dict, winp_dict, team_link_map, config: Config):
@@ -291,9 +312,6 @@ def main(rootDir : str = "", jupyter = False):
         subset=['Team', 'Teamlink']).drop_duplicates(subset='Team', keep='first')
     team_link_map = pd.Series(df_cleaned.Teamlink.values, index=df_cleaned.Team).to_dict()
     
-    people = calculateSailorRanks(people, config)
-    updateSailorRatios(people)
-    
     df_rivals = buildRivals(df_races_full, config)
     del df_races_full
     
@@ -312,8 +330,36 @@ def main(rootDir : str = "", jupyter = False):
     
     df_frAfter = pd.DataFrame(allFrRaces)
     df_trAfter = pd.DataFrame(allTrRaces)
-    
+
     del allFrRaces, allTrRaces
+
+    updateSailorRatios(people, df_frAfter)
+
+    # The joint WHR fit is a second pass over the same races. It has to run here, after
+    # df_frAfter is assembled: it needs this run's per-race ratingType (the open/womens
+    # split the openskill pass derived from entrant genders), and that is only on disk
+    # in postcalcFRraces.parquet from the PREVIOUS run - so any regatta scraped since
+    # then would be missing and silently dropped from the fit.
+    if config.useWHR:
+        import whr
+        if config.runWHRFit:
+            print("Running joint WHR fit")
+            whr.runFleetPipeline(rootDir=rootDir, wCurve=config.whrWCurve,
+                                 wLevel=config.whrWLevel, sigma0=config.whrSigma0,
+                                 targetSeasons=tuple(config.targetSeasons),
+                                 anchors=config.whrAnchor,
+                                 targetMean=config.whrTargetMean,
+                                 targetSd=config.whrTargetSd,
+                                 trSeasons=tuple(config.targetTRSeasons),
+                                 wTR=config.whrWTR, sigma0TR=config.whrSigma0TR)
+        people = loadWHRRatings(people, rootDir, config)
+        df_frAfter = applyWHRToRaces(df_frAfter, rootDir, config)
+    else:
+        df_frAfter['credit'] = np.nan
+
+    # Ranks come last, since with useWHR on they are ordered by the joint fit's
+    # interval lower bound.
+    people = calculateSailorRanks(people, config)
     # %%
     outlinks_dict = df_frAfter.groupby('sailorID')['outLinks'].sum().to_dict()
     
@@ -324,6 +370,8 @@ def main(rootDir : str = "", jupyter = False):
     winp_dict = combined.loc[combined['ratio'] >= 0].groupby(['sailorID', 'position', 'season'])['ratio'].mean().to_dict()
     
     counts = combined.groupby(['sailorID', 'position', 'season']).size()
+    # Total rated races per sailor, for the numRaces field in sailors-latest.json.
+    totalracecounts_dict = combined.groupby('sailorID').size().to_dict()
 
     racecounts_dict = {}
     for (s_id, pos, season), count in counts.items():
@@ -335,7 +383,7 @@ def main(rootDir : str = "", jupyter = False):
     
     # %% File Output
     
-    outputSailorsToFile(people, rootDir, config)
+    outputSailorsToFile(people, rootDir, config, raceCounts=totalracecounts_dict)
     
     df_rivals.to_parquet(rootDir + 'rivalstesting.parquet')
     

@@ -53,6 +53,11 @@ class Sailor:
     avgCrewRatio : int = 0
     
     ratingTypesReset : list[str] = field(default_factory=list)
+
+    # Joint WHR fit results, keyed by rating type:
+    #   {'sr': {'rating': 1623.4, 'se': 48.2, 'lcb': 1528.9}, ...}
+    # Populated from whr_sailors.parquet by loadWHRRatings; empty when useWHR is off.
+    whr : dict = field(default_factory=dict)
         
     def getRating(self, position : str, raceType : str, womens: bool, ordinal : bool = False, config : Config = None):
         pos = position.lower()
@@ -64,7 +69,7 @@ class Sailor:
         prefix += 't' if typ == 'team' else ''
         part = 's' if pos == 'skipper' else 'c'
         ratingObj = getattr(self, f"{prefix}{part}r")
-        if ordinal and Config is not None:
+        if ordinal and config is not None:
             return ratingObj.ordinal(target=config.targetElo,
                                        alpha=config.alpha)
         return ratingObj
@@ -87,7 +92,13 @@ class Sailor:
         return self.cross
         return len([race for race in self.races if 'cross' in race.keys() and race['cross']])
     
-    def isRankEligible(self, targetSeasons, pos, gradCutoff, outLinks=None , needsOutlinks=True):
+    def whrRating(self, ratingType, key="rating"):
+        """Fitted WHR rating / se / lcb for a rating type, or None if not fitted."""
+        entry = self.whr.get(ratingType)
+        return None if entry is None else entry.get(key)
+
+    def isRankEligible(self, targetSeasons, pos, gradCutoff, outLinks=None , needsOutlinks=True, requiredOutLinks=150,
+                       ratingType=None, maxRatingSE=None):
         if self.year is None or self.year == "?? *":
             # print(f"{self.key} has none year")
             return False
@@ -107,12 +118,23 @@ class Sailor:
             print(f"error happened to {self.key}")
             return False
         
-        if outLinks == None:
+        if not (self.hasTargetSeasons(targetSeasons, pos) and betterYear > gradCutoff):
+            return False
+
+        # Preferred gate: the posterior SE of "where does this sailor sit nationally",
+        # in rating points. This replaces the outLinks count, which measured
+        # connectivity backwards - PCCSC had the lowest pass rate and simultaneously
+        # the best-determined ratings of any conference.
+        if maxRatingSE is not None and ratingType is not None:
+            se = self.whrRating(ratingType, "se")
+            if se is not None:
+                return se < maxRatingSE
+            # no WHR fit for this sailor/type: fall through to the legacy gate
+
+        if outLinks is None:
             outLinks = self.outLinks
-        
-        return (self.hasTargetSeasons(targetSeasons, pos) # has target seasons
-                        and (outLinks > 150 if needsOutlinks else True) # and has x outlinks   
-                        and betterYear > gradCutoff) # and graduates after the cutoff
+
+        return (outLinks > requiredOutLinks) if needsOutlinks else True
         
     def resetRanks(self):
         self.skipperRank = 0
@@ -132,7 +154,11 @@ class Sailor:
             resetDate = resetDate.timestamp()
         
         for pos in ['s', 'c']:
-            newRT = 'w' if 'w' in ratingType else '' + 't' if 't' in ratingType else '' + pos + 'r'
+            # Build the rating attribute name, e.g. 'wfr' -> 'wsr'/'wcr', 'tr' -> 'tsr'/'tcr'.
+            # Written as an explicit concatenation because the conditional-expression
+            # form parsed as 'w' if 'w' in rt else ('t' if 't' in rt else pos+'r'),
+            # which returned bare 'w' or 't' for 3 of the 4 rating types.
+            newRT = ('w' if 'w' in ratingType else '') + ('t' if 't' in ratingType else '') + pos + 'r'
             racesBeforeReset = [r for r in self.races if r['date'] < resetDate and r['ratingType'] == newRT]
             
             if len(racesBeforeReset) > 0:
@@ -225,9 +251,12 @@ def createSailor(sd):
         for entry in sd['Seasons'][pos]:
             newSeasons[pos].append((entry[0], entry[1]))
             
-    return Sailor(sd['Sailor'], sd['key'], sd['gender'], sd['GradYear'], sd['Links'], sd['Teams'], newSeasons, 
-                  [], #sd['Races'] 
-                  {}, #sd['Rivals']     
+    # Everything after the eight ratings is passed by KEYWORD on purpose. Passing these
+    # positionally silently landed sd['Cross'] in `raceCount` and shifted every
+    # subsequent field by one (cross <- outLinks, outLinks <- SkipperRank, ...).
+    return Sailor(sd['Sailor'], sd['key'], sd['gender'], sd['GradYear'], sd['Links'], sd['Teams'], newSeasons,
+                  [], #sd['Races']
+                  {}, #sd['Rivals']
             PlackettLuceRating(sd['srMU'], sd['srSigma']),
             PlackettLuceRating(sd['crMU'], sd['crSigma']),
             PlackettLuceRating(sd['wsrMU'], sd['wsrSigma']),
@@ -235,13 +264,13 @@ def createSailor(sd):
             PlackettLuceRating(sd['tsrMU'], sd['tsrSigma']),
             PlackettLuceRating(sd['tcrMU'], sd['tcrSigma']),
             PlackettLuceRating(sd['wtsrMU'], sd['wtsrSigma']),
-            PlackettLuceRating(sd['wtcrMU'], sd['wtcrSigma']), 
-            sd['Cross'], sd['outLinks'], 
-            sd['SkipperRank'], sd['CrewRank'], 
-            sd['WomenSkipperRank'], sd['WomenCrewRank'], 
-            sd['TRSkipperRank'], sd['TRCrewRank'],
-            sd['TRWomenSkipperRank'], sd['TRWomenCrewRank'], 
-            sd['skipperAvgRatio'], sd['crewAvgRatio'])
+            PlackettLuceRating(sd['wtcrMU'], sd['wtcrSigma']),
+            cross=sd['Cross'], outLinks=sd['outLinks'],
+            skipperRank=sd['SkipperRank'], crewRank=sd['CrewRank'],
+            womenSkipperRank=sd['WomenSkipperRank'], womenCrewRank=sd['WomenCrewRank'],
+            skipperRankTR=sd['TRSkipperRank'], crewRankTR=sd['TRCrewRank'],
+            womenSkipperRankTR=sd['TRWomenSkipperRank'], womenCrewRankTR=sd['TRWomenCrewRank'],
+            avgSkipperRatio=sd['skipperAvgRatio'], avgCrewRatio=sd['crewAvgRatio'])
 
 def setupPeople(df_sailor_ratings, df_sailor_info, config: Config):
     if config.calcAll:
@@ -288,31 +317,33 @@ def validPerson(p, type, config: Config):
             # and sum([p['raceCount'][seas] for seas in targetSeasons if seas in p['raceCount'].keys()]) > 5
             )
 
-def outputSailorsToFile(people, rootDir, config: Config ):
+def outputSailorsToFile(people, rootDir, config: Config, raceCounts: dict = None):
+    """Serialize sailors to sailors-latest.json (the state the incremental path reads back).
+
+    numRaces/outLinks/Cross come from the Sailor attributes and the supplied race
+    counts, not from p.races: the calculation pass never populates p.races, so
+    deriving them from it wrote 0 for every sailor on every run.
+    """
+    raceCounts = raceCounts or {}
     allRows = []
     for sailor, p in people.items():
 
-        allRows.append([p.name, len(p.races), sailor,
+        allRows.append([p.name, raceCounts.get(sailor, 0), sailor,
                         p.skipperRank, p.crewRank, p.womenSkipperRank,
                         p.womenCrewRank, p.skipperRankTR, p.womenSkipperRankTR, p.crewRankTR, p.womenCrewRankTR,
                         p.teams,
                         p.gender,
-                        p.sr.ordinal(target=config.targetElo,
-                                     alpha=config.alpha),
-                        p.cr.ordinal(target=config.targetElo,
-                                     alpha=config.alpha),
-                        p.wsr.ordinal(target=config.targetElo,
-                                      alpha=config.alpha),
-                        p.wcr.ordinal(target=config.targetElo,
-                                      alpha=config.alpha),
-                        p.tsr.ordinal(target=config.targetElo,
-                                      alpha=config.alpha),
-                        p.tcr.ordinal(target=config.targetElo,
-                                      alpha=config.alpha),
-                        p.wtsr.ordinal(target=config.targetElo,
-                                       alpha=config.alpha),
-                        p.wtcr.ordinal(target=config.targetElo,
-                                       alpha=config.alpha),
+                        # The *Ord columns carry whatever is being published, so they
+                        # follow the joint fit when it is in use rather than always
+                        # reporting openskill ordinals.
+                        publishedRating(p, 'sr', config),
+                        publishedRating(p, 'cr', config),
+                        publishedRating(p, 'wsr', config),
+                        publishedRating(p, 'wcr', config),
+                        publishedRating(p, 'tsr', config),
+                        publishedRating(p, 'tcr', config),
+                        publishedRating(p, 'wtsr', config),
+                        publishedRating(p, 'wtcr', config),
                         p.sr.mu, p.sr.sigma,
                         p.cr.mu, p.cr.sigma,
                         p.wsr.mu, p.wsr.sigma,
@@ -321,12 +352,10 @@ def outputSailorsToFile(people, rootDir, config: Config ):
                         p.tcr.mu, p.tcr.sigma,
                         p.wtsr.mu, p.wtsr.sigma,
                         p.wtcr.mu, p.wtcr.sigma,
-                        sum([race['outLinks']
-                            for race in p.races if 'outLinks' in race.keys()]),
+                        p.outLinks,
                         p.year, p.links,
                         p.seasons,
-                        sum([race['cross']
-                            for race in p.races if 'cross' in race.keys()]),
+                        p.cross,
                         p.races, p.rivals, p.avgSkipperRatio, p.avgCrewRatio])
 
     df_sailors = pd.DataFrame(allRows, columns=['Sailor', 'numRaces', 'key', 'SkipperRank', 'CrewRank', 'WomenSkipperRank', 'WomenCrewRank', 'TRSkipperRank', 'TRWomenSkipperRank', 'TRCrewRank', 'TRWomenCrewRank', 'Teams', 'gender',
@@ -355,54 +384,72 @@ def outputSailorsToFile(people, rootDir, config: Config ):
         by='numRaces', ascending=False).reset_index(drop=True)
     
     
+# (rating attribute, Sailor rank field, position, uses team-race seasons)
+RANK_SPECS = [
+    ("sr",   "skipperRank",       "skipper", False),
+    ("cr",   "crewRank",          "crew",    False),
+    ("wsr",  "womenSkipperRank",  "skipper", False),
+    ("wcr",  "womenCrewRank",     "crew",    False),
+    ("tsr",  "skipperRankTR",     "skipper", True),
+    ("tcr",  "crewRankTR",        "crew",    True),
+    ("wtsr", "womenSkipperRankTR","skipper", True),
+    ("wtcr", "womenCrewRankTR",   "crew",    True),
+]
+
+
 def calculateSailorRanks(people : dict[str,Sailor], config : Config):
-    eligible_skippers = [p for p in people.values()
-                         if p.isRankEligible(config.targetSeasons, 'skipper', config.gradCutoff)]
-    
-    eligible_crews = [p for p in people.values()
-                      if p.isRankEligible(config.targetSeasons, 'crew', config.gradCutoff)]
+    """Assign per-rating-type national ranks.
 
-    # TODO: Count tr and fr seasons seperately
-    eligible_skippers_tr = [p for p in people.values()
-                            if p.isRankEligible(config.targetTRSeasons, 'skipper', config.gradCutoff, needsOutlinks=False)]
-    eligible_crews_tr = [p for p in people.values()
-                         if p.isRankEligible(config.targetTRSeasons, 'crew', config.gradCutoff, needsOutlinks=False)]
-    
-    print(len(eligible_skippers_tr))
-
+    Eligibility and ordering are both resolved per rating type rather than per
+    position, because a sailor's open rating can be well determined while their
+    women's-fleet rating is not. With useWHR on, eligibility is the posterior SE gate
+    and ordering is by the interval lower bound.
+    """
     for p in people.values():
         p.resetRanks()
 
-    for i, s in enumerate(sorted([p for p in eligible_skippers if p.sr.mu != config.model.mu], key=lambda p: p.sr.ordinal(), reverse=True)):
-        s.skipperRank = i + 1
-    for i, s in enumerate(sorted([p for p in eligible_crews if p.cr.mu != config.model.mu], key=lambda p: p.cr.ordinal(), reverse=True)):
-        s.crewRank = i + 1
+    for ratingType, rankField, pos, isTR in RANK_SPECS:
+        seasons = config.targetTRSeasons if isTR else config.targetSeasons
+        # Team racing has never had a connectivity gate; keep that until the joint fit
+        # covers team races.
+        useSE = config.useWHR and not isTR
 
-    for i, s in enumerate(sorted([p for p in eligible_skippers if p.wsr.mu != config.model.mu], key=lambda p: p.wsr.ordinal(), reverse=True)):
-        s.womenSkipperRank = i + 1
-    for i, s in enumerate(sorted([p for p in eligible_crews if p.wcr.mu != config.model.mu], key=lambda p: p.wcr.ordinal(), reverse=True)):
-        s.womenCrewRank = i + 1
+        eligible = [p for p in people.values()
+                    if p.isRankEligible(
+                        seasons, pos, config.gradCutoff,
+                        needsOutlinks=not isTR,
+                        requiredOutLinks=config.requiredOutLinks,
+                        ratingType=ratingType if useSE else None,
+                        maxRatingSE=config.maxRatingSE if useSE else None)
+                    and hasRating(p, ratingType, config)]
 
-    for i, s in enumerate(sorted([p for p in eligible_skippers_tr if p.tsr.mu != config.model.mu], key=lambda p: p.tsr.ordinal(), reverse=True)):
-        s.skipperRankTR = i + 1
-    for i, s in enumerate(sorted([p for p in eligible_crews_tr if p.tcr.mu != config.model.mu], key=lambda p: p.tcr.ordinal(), reverse=True)):
-        s.crewRankTR = i + 1
+        ordered = sorted(eligible, key=lambda p: rankingKey(p, ratingType, config),
+                         reverse=True)
+        for i, p in enumerate(ordered):
+            setattr(p, rankField, i + 1)
+        print(f"  {ratingType}: {len(ordered):,} ranked")
 
-    for i, s in enumerate(sorted([p for p in eligible_skippers_tr if p.wtsr.mu != config.model.mu], key=lambda p: p.wtsr.ordinal(), reverse=True)):
-        s.womenSkipperRankTR = i + 1
-    for i, s in enumerate(sorted([p for p in eligible_crews_tr if p.wtcr.mu != config.model.mu], key=lambda p: p.wtcr.ordinal(), reverse=True)):
-        s.womenCrewRankTR = i + 1
-    
     return people
 
-def updateSailorRatios(people: dict[str, Sailor]):
+
+def updateSailorRatios(people: dict[str, Sailor], df_frAfter: pd.DataFrame):
+    """Set each sailor's average finish ratio per position.
+
+    Derived from the accumulated post-calc race frame rather than Sailor.races:
+    Sailor.races is never populated by the calculation pass (updateRaces appends to a
+    single shared list), so the previous implementation silently set every ratio to
+    0.0. Reading the frame also avoids duplicating ~1.5M race dicts into the Sailor
+    objects, which is what makes sailors-latest.json enormous.
+    """
+    if df_frAfter.empty:
+        return
+
+    ratios = df_frAfter.loc[df_frAfter['ratio'].notna()]
+    means = ratios.groupby(['sailorID', ratios['position'].str.lower()])['ratio'].mean()
+
     for key, p in people.items():
-        skipper_ratios = [r['ratio'] for r in p.races if r['pos'].lower() == 'skipper' and 'ratio' in r.keys() and not np.isnan(r['ratio'])]
-        crew_ratios = [r['ratio'] for r in p.races if r['pos'].lower() == 'crew' and 'ratio' in r.keys() and not np.isnan(r['ratio'])]
-        avgSkipperRatio = float(np.mean(skipper_ratios)) if skipper_ratios else 0.0
-        avgCrewRatio = float(np.mean(crew_ratios)) if crew_ratios else 0.0
-        p.avgSkipperRatio = avgSkipperRatio
-        p.avgCrewRatio = avgCrewRatio
+        p.avgSkipperRatio = float(means.get((key, 'skipper'), 0.0))
+        p.avgCrewRatio = float(means.get((key, 'crew'), 0.0))
 
 def getCounts(races):
     # season_counts = defaultdict(int)
@@ -434,10 +481,11 @@ def uploadSailors(people, connection, config : Config, batch_size=300):
     sailorSQL = """
                     INSERT INTO Sailors (
                         sailorID, name, gender, sr, cr, wsr, wcr, tsr, tcr, wtsr, wtcr,
+                        srSE, crSE, wsrSE, wcrSE,
                         sRank, cRank, wsRank, wcRank, tsRank, tcRank, wtsRank, wtcRank,
                         avgSkipperRatio, avgCrewRatio, crossLinks, outLinks, year
                     )
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     ON DUPLICATE KEY UPDATE
                         sr = VALUES(sr),
                         cr = VALUES(cr),
@@ -447,6 +495,10 @@ def uploadSailors(people, connection, config : Config, batch_size=300):
                         tcr = VALUES(tcr),
                         wtsr = VALUES(wtsr),
                         wtcr = VALUES(wtcr),
+                        srSE = VALUES(srSE),
+                        crSE = VALUES(crSE),
+                        wsrSE = VALUES(wsrSE),
+                        wcrSE = VALUES(wcrSE),
                         sRank = VALUES(sRank),
                         cRank = VALUES(cRank),
                         wsRank = VALUES(wsRank),
@@ -479,14 +531,21 @@ def uploadSailors(people, connection, config : Config, batch_size=300):
             p.key.replace("/", "-"),
             p.name,
             p.gender,
-            int(p.sr.ordinal(target=config.targetElo, alpha=200 / config.model.sigma)),
-            int(p.cr.ordinal(target=config.targetElo, alpha=200 / config.model.sigma)),
-            int(p.wsr.ordinal(target=config.targetElo, alpha=200 / config.model.sigma)),
-            int(p.wcr.ordinal(target=config.targetElo, alpha=200 / config.model.sigma)),
-            int(p.tsr.ordinal(target=config.targetElo, alpha=200 / config.model.sigma)),
-            int(p.tcr.ordinal(target=config.targetElo, alpha=200 / config.model.sigma)),
-            int(p.wtsr.ordinal(target=config.targetElo, alpha=200 / config.model.sigma)),
-            int(p.wtcr.ordinal(target=config.targetElo, alpha=200 / config.model.sigma)),
+            # publishedRating returns the joint-fit value when useWHR is on and falls
+            # back to the openskill ordinal otherwise, so these columns keep their
+            # meaning and scale either way.
+            int(publishedRating(p, 'sr', config)),
+            int(publishedRating(p, 'cr', config)),
+            int(publishedRating(p, 'wsr', config)),
+            int(publishedRating(p, 'wcr', config)),
+            int(publishedRating(p, 'tsr', config)),
+            int(publishedRating(p, 'tcr', config)),
+            int(publishedRating(p, 'wtsr', config)),
+            int(publishedRating(p, 'wtcr', config)),
+            publishedSE(p, 'sr', config),
+            publishedSE(p, 'cr', config),
+            publishedSE(p, 'wsr', config),
+            publishedSE(p, 'wcr', config),
             int(p.skipperRank),
             int(p.crewRank),
             int(p.womenSkipperRank),
@@ -556,3 +615,149 @@ def uploadSailors(people, connection, config : Config, batch_size=300):
             connection.commit()
 
     print("✅ All sailors uploaded successfully!")
+
+def loadWHRRatings(people: dict[str, Sailor], rootDir, config: Config,
+                   whrFile="whr_sailors.parquet"):
+    """Attach joint-WHR ratings, SEs and lower confidence bounds onto the Sailors.
+
+    Reads the output of whr.runFleetPipeline. Silently no-ops if the file is absent so
+    the openskill pipeline still runs on a clean checkout.
+    """
+    import os
+    path = rootDir + whrFile
+    if not os.path.exists(path):
+        print(f"No {whrFile}; skipping WHR ratings. Run refactor/whr.py first.")
+        return people
+
+    df = pd.read_parquet(path)
+    attached = 0
+    for row in df.itertuples(index=False):
+        p = people.get(row.sailorID)
+        if p is None:
+            continue
+        p.whr[row.ratingType] = {"rating": float(row.rating),
+                                 "se": float(row.se),
+                                 "lcb": float(row.lcb)}
+        attached += 1
+    print(f"Attached {attached:,} WHR ratings across "
+          f"{df['ratingType'].nunique()} rating types.")
+    return people
+
+
+def rankingKey(sailor: Sailor, ratingType: str, config: Config):
+    """Value to sort rankings by.
+
+    Fleet ratings sort by the interval lower bound, so a sailor whose national
+    placement is barely identified sinks on their own - no conference constant
+    anywhere in the calculation.
+
+    Team-race ratings sort by the POINT estimate instead. In 3v3 team racing only the
+    combined strength of three sailors is ever observed, so an individual's SE is
+    around one full standard deviation (against 0.36 for the team as a whole).
+    Subtracting 1.96 of that would order the leaderboard by uncertainty rather than
+    by skill.
+    """
+    if config.useWHR:
+        isTR = ratingType.startswith("t") or ratingType.startswith("wt")
+        v = sailor.whrRating(ratingType, "rating" if isTR else "lcb")
+        if v is not None:
+            return v
+    return getattr(sailor, ratingType).ordinal(target=config.targetElo,
+                                               alpha=config.alpha)
+
+
+def publishedRating(sailor: Sailor, ratingType: str, config: Config):
+    """The rating value written to the DB and shown on the site.
+
+    With useWHR on this is the joint-fit rating, which is anchored per rating type onto
+    the ranked population so it lands on the same scale the site already displays and
+    the existing INT columns can be reused unchanged. Team-race types have no joint fit
+    yet, so they always fall through to openskill.
+    """
+    if config.useWHR:
+        r = sailor.whrRating(ratingType, "rating")
+        if r is not None:
+            return r
+    return getattr(sailor, ratingType).ordinal(target=config.targetElo,
+                                               alpha=config.alpha)
+
+
+def hasRating(sailor: Sailor, ratingType: str, config: Config):
+    """Whether this sailor has a usable rating of this type.
+
+    Asks the joint fit when it is in use. The previous test was
+    `getattr(p, ratingType).mu != config.model.mu` - "has openskill moved this sailor
+    off the prior mean" - which silently required the openskill pass to have run even
+    when its ratings were no longer being published.
+    """
+    if config.useWHR:
+        if sailor.whrRating(ratingType) is not None:
+            return True
+        if sailor.whr:
+            return False        # fitted, just not for this rating type
+    return getattr(sailor, ratingType).mu != config.model.mu
+
+
+def publishedSE(sailor: Sailor, ratingType: str, config: Config):
+    """Posterior SE of the rating in display points, or None when not fitted."""
+    return sailor.whrRating(ratingType, "se") if config.useWHR else None
+
+
+SAILOR_WHR_DDL = """
+-- Minimal migration for the joint WHR fit.
+--
+-- The rating columns (sr, cr, wsr, wcr, tsr, tcr, wtsr, wtcr) are REUSED as-is: the
+-- joint fit is anchored per rating type onto the ranked population, so it lands on
+-- the same scale the front end already renders and stays an INT. Ranks, ratios,
+-- crossLinks and outLinks are unchanged. outLinks is retained as a descriptive stat
+-- even though it no longer gates eligibility.
+--
+-- Only the four fleet standard errors are new. They are nullable, so the front end
+-- can ignore them until it is ready to render intervals.
+
+ALTER TABLE Sailors
+  ADD COLUMN srSE  FLOAT NULL AFTER wtcr,
+  ADD COLUMN crSE  FLOAT NULL AFTER srSE,
+  ADD COLUMN wsrSE FLOAT NULL AFTER crSE,
+  ADD COLUMN wcrSE FLOAT NULL AFTER wsrSE;
+
+-- Per-race credit: the joint-fit replacement for the sequential per-race delta.
+-- oldRating/newRating are REUSED as-is - the ladder in whr.raceLadder is built so that
+-- newRating - oldRating == credit, so any existing "gained this race" display keeps
+-- working. credit is stored separately at full precision because oldRating and
+-- newRating are INT and rounding would flatten small values.
+ALTER TABLE FleetScores
+  ADD COLUMN credit FLOAT NULL AFTER newRating;
+"""
+
+
+def applyWHRToRaces(df_frAfter: pd.DataFrame, rootDir, config: Config,
+                    whrFile="whr_races.parquet"):
+    """Overlay the joint fit's per-race ladder onto the fleet score rows.
+
+    Replaces oldRating/newRating/predicted with the joint-fit values and adds
+    `credit`. The ladder is built so newRating - oldRating == credit, so the existing
+    "rating gained this race" display keeps working with no front-end change.
+
+    Rows with no joint fit (team races, or fleet rows the fit skipped) keep their
+    openskill values and get a NULL credit.
+    """
+    import os
+    path = rootDir + whrFile
+    if not os.path.exists(path):
+        print(f"No {whrFile}; leaving openskill per-race ratings in place.")
+        df_frAfter["credit"] = np.nan
+        return df_frAfter
+
+    w = pd.read_parquet(path, columns=["raceID", "sailorID", "position", "ratingType",
+                                       "oldRating", "newRating", "predicted", "credit",
+                                       "regAvg"])
+    key = ["raceID", "sailorID", "position", "ratingType"]
+    merged = df_frAfter.merge(w, on=key, how="left", suffixes=("", "_whr"))
+
+    hit = merged["credit"].notna()
+    for col in ("oldRating", "newRating", "predicted", "regAvg"):
+        merged[col] = merged[col + "_whr"].where(hit, merged[col])
+    merged = merged.drop(columns=[c for c in merged.columns if c.endswith("_whr")])
+    print(f"Applied WHR per-race ratings to {int(hit.sum()):,} of {len(merged):,} fleet rows.")
+    return merged

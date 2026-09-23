@@ -146,12 +146,16 @@ def calculateTR(allRaces : list[dict], people : dict[str, Sailor], resetDate, da
     ranks = [1 if row['teamAOutcome'].iat[0] == 'win' else 2,
              1 if row['teamBOutcome'].iat[0] == 'win' else 2]
     
-    predictions = config.model.predict_rank([teamARatings, teamBRatings])
+    if config.runOpenskill:
+        predictions = config.model.predict_rank([teamARatings, teamBRatings])
 
-    teamARatings, teamBRatings = config.model.rate([teamARatings, teamBRatings],ranks=ranks)
-    
-    updateRatings(womens, teamARacers, teamARatings, pos)
-    updateRatings(womens, teamBRacers, teamBRatings, pos)
+        teamARatings, teamBRatings = config.model.rate([teamARatings, teamBRatings],ranks=ranks)
+
+        updateRatings(womens, teamARacers, teamARatings, pos)
+        updateRatings(womens, teamBRacers, teamBRatings, pos)
+    else:
+        # Scaffold only - see the note in calculationsFR.calculateFR.
+        predictions = [[0], [0]]
     
     updateRacesForTeam(allRaces, 'A', 0, teamARacers, teamBRacers, row['teamABoats'].iat[0], startingARating, teamAName, pos, season, womens, row, date, predictions, venue, regattaAvg, teamARatings, config)
     

@@ -4,36 +4,53 @@ import datetime
 import pandas as pd
 import numpy as np
 import mysql
-from Sailors import Sailor
+from Sailors import Sailor, rankingKey, hasRating, publishedRating
 
 def getOrderedSailors(people : list[Sailor], ratingType, pos, outlinks_dict, config : Config):
     numTops = config.numTops['tr' if 't' in ratingType else 'fr']['open' if 'w' not in ratingType else 'womens']
     isTR = 't' in ratingType
     outlinks_keys = outlinks_dict.keys()
     eligible_people = [p for p in people
-                        if p.isRankEligible(config.targetSeasons, pos, config.gradCutoff, outLinks= outlinks_dict[p.key] 
-                        if p.key in outlinks_keys else None, needsOutlinks= not isTR)
-                        and getattr(p, ratingType).mu != config.model.mu]
-    orderedSailors = sorted(eligible_people,
-                            key=lambda x: getattr(x, ratingType).ordinal(
-                                target=config.targetElo, alpha=config.alpha),
-                            reverse=True)
+                        if p.isRankEligible(config.targetSeasons, pos, config.gradCutoff, outLinks= outlinks_dict[p.key]
+                        if p.key in outlinks_keys else None, needsOutlinks= not isTR,
+                        requiredOutLinks=config.requiredOutLinks,
+                        ratingType=ratingType if (config.useWHR and not isTR) else None,
+                        maxRatingSE=config.maxRatingSE if (config.useWHR and not isTR) else None)
+                        and hasRating(p, ratingType, config)]
+    # Team ratings use the POINT estimate, not the interval lower bound the individual
+    # leaderboard uses. Subtracting 1.96*SE from every sailor ranks teams partly by how
+    # precisely their sailors are known, which systematically favours teams whose
+    # sailors race more: USC's top three had 65/56/29 races and Northeastern's 21/10/10,
+    # so USC won on lower bound (1799 vs 1790) while losing on point estimate
+    # (1863 vs 1895). The joint fit's point estimate is already shrunk toward the prior
+    # for low-data sailors, so the extra penalty is double counting.
+    if config.teamRatingUseLowerBound:
+        def value(p):
+            v = p.whrRating(ratingType, 'lcb') if config.useWHR else None
+            return v if v is not None else publishedRating(p, ratingType, config)
+    else:
+        value = lambda p: publishedRating(p, ratingType, config)
 
-    sailorSum = sum([getattr(p, ratingType).ordinal(target=config.targetElo, alpha=config.alpha)
-                            for p in orderedSailors[:numTops]])
-    topSailors = [{'name': p.name, 'key': p.key,
-                    ratingType: getattr(p, ratingType).ordinal(target=config.targetElo, alpha=config.alpha)} for p in orderedSailors[:numTops]]
-    return topSailors, sailorSum
+    orderedSailors = sorted(eligible_people, key=value, reverse=True)
+    top = orderedSailors[:numTops]
+
+    # Sum and count are returned together so the caller can divide by the number of
+    # sailors actually found. Dividing by numTops regardless scored a missing sailor
+    # as a rating of ZERO rather than as unknown, which crushed thin rosters - 41 of
+    # 161 teams have fewer than three eligible open skippers.
+    sailorSum = sum(value(p) for p in top)
+    topSailors = [{'name': p.name, 'key': p.key, ratingType: value(p)} for p in top]
+    return topSailors, sailorSum, len(top)
 
 def calculateTopSailors(filtered_people, outlinks_dict, isTeamRace, isWomens, config: Config):
     prefix = 't' if isTeamRace else ''
     if isWomens:
         prefix = 'w' + prefix
-    topSkippers, topSkippersSum = getOrderedSailors(filtered_people, prefix + 'sr', 'skipper', outlinks_dict, config)
-    topCrews, topCrewsSum = getOrderedSailors(filtered_people, prefix + 'cr', 'crew', outlinks_dict, config)
+    topSkippers, topSkippersSum, nSkippers = getOrderedSailors(filtered_people, prefix + 'sr', 'skipper', outlinks_dict, config)
+    topCrews, topCrewsSum, nCrews = getOrderedSailors(filtered_people, prefix + 'cr', 'crew', outlinks_dict, config)
 
-    numTops = config.numTops['tr' if isTeamRace else 'fr']['womens' if isWomens else 'open']
-    topRating = (topSkippersSum + topCrewsSum) / (numTops * 2)
+    found = nSkippers + nCrews
+    topRating = (topSkippersSum + topCrewsSum) / found if found else 0
     return topRating, topSkippers, topCrews
 
 def getRankType(sailor, season, topSailors, rankTypes, config: Config):
@@ -108,26 +125,24 @@ def calculateAvgRatio(filtered_people: list[Sailor], winp_dict):
         avgRatio = 0
     return avgRatio
 
+FLEET_TYPES = ('sr', 'cr', 'wsr', 'wcr')
+TEAM_TYPES = ('tsr', 'tcr', 'wtsr', 'wtcr')
+
+
 def calculateAvgRating(people : list[Sailor], config:Config):
+    """Mean over sailors of their best fleet rating and their best team-race rating.
+
+    Goes through publishedRating, so it follows whichever model is in use. It used to
+    read the openskill ordinals directly - and the team-race block actually read the
+    FLEET attributes, so team ratings never contributed and fleet ones were counted
+    twice.
+    """
     ratings = []
     for p in people:
-        sr = p.sr.ordinal(target=config.targetElo, alpha=config.alpha)
-        cr = p.cr.ordinal(target=config.targetElo, alpha=config.alpha)
-        wsr = p.wsr.ordinal(target=config.targetElo, alpha=config.alpha)
-        wcr = p.wcr.ordinal(target=config.targetElo, alpha=config.alpha)
-        ratings.append(max([sr if sr != config.targetElo else 0, 
-                         cr if cr != config.targetElo else 0, 
-                         wsr if wsr != config.targetElo else 0, 
-                         wcr if wcr != config.targetElo else 0]))
-        
-        tsr = p.sr.ordinal(target=config.targetElo, alpha=config.alpha)
-        tcr = p.cr.ordinal(target=config.targetElo, alpha=config.alpha)
-        wtsr = p.wsr.ordinal(target=config.targetElo, alpha=config.alpha)
-        wtcr = p.wcr.ordinal(target=config.targetElo, alpha=config.alpha)
-        ratings.append(max([tsr if tsr != config.targetElo else 0, 
-                         tcr if tcr != config.targetElo else 0, 
-                         wtsr if wtsr != config.targetElo else 0, 
-                         wtcr if wtcr != config.targetElo else 0]))
+        for group in (FLEET_TYPES, TEAM_TYPES):
+            vals = [publishedRating(p, rt, config) for rt in group
+                    if hasRating(p, rt, config)]
+            ratings.append(max(vals) if vals else 0)
 
     return sum(ratings) / len(ratings) if len(ratings) > 0 else 0
     
