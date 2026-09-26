@@ -22,7 +22,10 @@ class Config:
         'kaelyn-holmes-2029': 'kaelyn-holmes',
         'Nathalie Caudron-Northeastern': 'nathalie-caudron', 
         'olivia-figley-2026': 'olivia-figley',
-        'Winter vetrone-Northeastern': 'winter-vetrone'
+        'Winter vetrone-Northeastern': 'winter-vetrone',
+        'pierce-olsen-2029' : "pierce-olsen",
+        'fynn-olsen-2029' : 'fynn-olsen',
+        'marcus-abate-2020' : 'marcus-abate'
     }
     numTops : ClassVar[dict[str, int]] = {'fr': {'open': 3, 'womens': 2}, 'tr': {'open': 3, 'womens': 3}}
     requiredOutLinks : int = 120
