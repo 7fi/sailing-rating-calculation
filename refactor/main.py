@@ -351,7 +351,8 @@ def main(rootDir : str = "", jupyter = False):
                                  targetMean=config.whrTargetMean,
                                  targetSd=config.whrTargetSd,
                                  trSeasons=tuple(config.targetTRSeasons),
-                                 wTR=config.whrWTR, sigma0TR=config.whrSigma0TR)
+                                 wTR=config.whrWTR, sigma0TR=config.whrSigma0TR,
+                                 regattaNoiseFraction=config.whrRegattaNoiseFraction)
         people = loadWHRRatings(people, rootDir, config)
         df_frAfter = applyWHRToRaces(df_frAfter, rootDir, config)
     else:

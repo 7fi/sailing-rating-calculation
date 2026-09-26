@@ -98,7 +98,7 @@ class Sailor:
         return None if entry is None else entry.get(key)
 
     def isRankEligible(self, targetSeasons, pos, gradCutoff, outLinks=None , needsOutlinks=True, requiredOutLinks=150,
-                       ratingType=None, maxRatingSE=None):
+                       ratingType=None, maxRatingSE=None, minRegattas=0):
         if self.year is None or self.year == "?? *":
             # print(f"{self.key} has none year")
             return False
@@ -128,6 +128,10 @@ class Sailor:
         if maxRatingSE is not None and ratingType is not None:
             se = self.whrRating(ratingType, "se")
             if se is not None:
+                # Distinct regattas, not races: one regatta is one sample of form no
+                # matter how many races it contained.
+                if minRegattas and (self.whrRating(ratingType, "regattas") or 0) < minRegattas:
+                    return False
                 return se < maxRatingSE
             # no WHR fit for this sailor/type: fall through to the legacy gate
 
@@ -420,7 +424,8 @@ def calculateSailorRanks(people : dict[str,Sailor], config : Config):
                         needsOutlinks=not isTR,
                         requiredOutLinks=config.requiredOutLinks,
                         ratingType=ratingType if useSE else None,
-                        maxRatingSE=config.maxRatingSE if useSE else None)
+                        maxRatingSE=config.maxRatingSE if useSE else None,
+                        minRegattas=config.minRegattasRanked if useSE else 0)
                     and hasRating(p, ratingType, config)]
 
         ordered = sorted(eligible, key=lambda p: rankingKey(p, ratingType, config),
@@ -616,6 +621,14 @@ def uploadSailors(people, connection, config : Config, batch_size=300):
 
     print("✅ All sailors uploaded successfully!")
 
+def _asInt(v, default=0):
+    """int() that tolerates a missing/NaN value (e.g. a column only some frames have)."""
+    try:
+        return default if v is None or v != v else int(v)
+    except (TypeError, ValueError):
+        return default
+
+
 def loadWHRRatings(people: dict[str, Sailor], rootDir, config: Config,
                    whrFile="whr_sailors.parquet"):
     """Attach joint-WHR ratings, SEs and lower confidence bounds onto the Sailors.
@@ -637,7 +650,10 @@ def loadWHRRatings(people: dict[str, Sailor], rootDir, config: Config,
             continue
         p.whr[row.ratingType] = {"rating": float(row.rating),
                                  "se": float(row.se),
-                                 "lcb": float(row.lcb)}
+                                 "lcb": float(row.lcb),
+                                 "shrunk": float(getattr(row, "shrunk", row.rating)),
+                                 "popmean": float(getattr(row, "popmean", row.rating)),
+                                 "regattas": _asInt(getattr(row, "regattas", 0))}
         attached += 1
     print(f"Attached {attached:,} WHR ratings across "
           f"{df['ratingType'].nunique()} rating types.")
@@ -647,19 +663,14 @@ def loadWHRRatings(people: dict[str, Sailor], rootDir, config: Config,
 def rankingKey(sailor: Sailor, ratingType: str, config: Config):
     """Value to sort rankings by.
 
-    Fleet ratings sort by the interval lower bound, so a sailor whose national
-    placement is barely identified sinks on their own - no conference constant
-    anywhere in the calculation.
-
-    Team-race ratings sort by the POINT estimate instead. In 3v3 team racing only the
-    combined strength of three sailors is ever observed, so an individual's SE is
-    around one full standard deviation (against 0.36 for the team as a whole).
-    Subtracting 1.96 of that would order the leaderboard by uncertainty rather than
-    by skill.
+    Sorts on the empirical-Bayes shrunk rating for every rating type. Ranking on
+    rating - 1.96*SE ordered the board partly by how precisely a sailor was known,
+    which favoured whoever raced most; ranking on the raw point estimate let a sailor
+    who won four races in a seven-boat fleet reach the top of the country. Shrinking
+    by reliability regresses thin records toward average by the right amount instead.
     """
     if config.useWHR:
-        isTR = ratingType.startswith("t") or ratingType.startswith("wt")
-        v = sailor.whrRating(ratingType, "rating" if isTR else "lcb")
+        v = sailor.whrRating(ratingType, getattr(config, "rankingStatistic", "lcb"))
         if v is not None:
             return v
     return getattr(sailor, ratingType).ordinal(target=config.targetElo,
@@ -675,7 +686,7 @@ def publishedRating(sailor: Sailor, ratingType: str, config: Config):
     yet, so they always fall through to openskill.
     """
     if config.useWHR:
-        r = sailor.whrRating(ratingType, "rating")
+        r = sailor.whrRating(ratingType, getattr(config, "publishedStatistic", "rating"))
         if r is not None:
             return r
     return getattr(sailor, ratingType).ordinal(target=config.targetElo,
@@ -749,15 +760,27 @@ def applyWHRToRaces(df_frAfter: pd.DataFrame, rootDir, config: Config,
         df_frAfter["credit"] = np.nan
         return df_frAfter
 
-    w = pd.read_parquet(path, columns=["raceID", "sailorID", "position", "ratingType",
-                                       "oldRating", "newRating", "predicted", "credit",
-                                       "regAvg"])
+    cols = ["raceID", "sailorID", "position", "ratingType", "oldRating", "newRating",
+            "predicted", "credit", "regAvg"]
+    # theta is only present once the pipeline has been re-run since it was added.
+    try:
+        w = pd.read_parquet(path, columns=cols + ["theta"])
+    except Exception:
+        w = pd.read_parquet(path, columns=cols)
     key = ["raceID", "sailorID", "position", "ratingType"]
     merged = df_frAfter.merge(w, on=key, how="left", suffixes=("", "_whr"))
 
     hit = merged["credit"].notna()
     for col in ("oldRating", "newRating", "predicted", "regAvg"):
         merged[col] = merged[col + "_whr"].where(hit, merged[col])
+    # Put the joint fit's raw theta where the harness expects a skill value, so the
+    # pairwise metrics keep working once the openskill pass is off (use link="logit",
+    # beta=1). oldSigma goes to 0: the joint fit's uncertainty is per sailor, not per
+    # race, and lives on whr_sailors.parquet.
+    if "theta" in merged.columns:
+        merged["oldMu"] = merged["theta"].where(hit, merged.get("oldMu"))
+        merged["oldSigma"] = np.where(hit, 0.0, merged.get("oldSigma", 0.0))
+        merged = merged.drop(columns=["theta"])
     merged = merged.drop(columns=[c for c in merged.columns if c.endswith("_whr")])
     print(f"Applied WHR per-race ratings to {int(hit.sum()):,} of {len(merged):,} fleet rows.")
     return merged

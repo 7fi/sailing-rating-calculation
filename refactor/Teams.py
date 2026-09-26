@@ -7,40 +7,55 @@ import mysql
 from Sailors import Sailor, rankingKey, hasRating, publishedRating
 
 def getOrderedSailors(people : list[Sailor], ratingType, pos, outlinks_dict, config : Config):
+    """Each school's top N sailors for one rating type, and their rating sum.
+
+    Two deliberate differences from the individual leaderboard:
+
+    * **No uncertainty gate.** Measured against actual cross-region regatta results,
+      applying the SE gate here made things worse (PCCSC bias +0.112 vs +0.084),
+      because it strips a team's weaker sailors and leaves only their best. The gate
+      exists to decide who is confidently *ranked*, not how strong a team is.
+    * **A missing top-N slot counts as the population mean**, not as zero and not as
+      absent. Dividing by numTops regardless scored a thin roster as if its third
+      sailor had a rating of 0; dividing by however many were found rewarded thin
+      rosters instead, letting a team with two strong sailors and no depth outrank a
+      team with three.
+
+    Ordering and summing both use publishedRating, i.e. the empirical-Bayes shrunk
+    estimate, so a sailor with one regatta contributes close to average rather than
+    at face value.
+    """
     numTops = config.numTops['tr' if 't' in ratingType else 'fr']['open' if 'w' not in ratingType else 'womens']
     isTR = 't' in ratingType
-    outlinks_keys = outlinks_dict.keys()
     eligible_people = [p for p in people
-                        if p.isRankEligible(config.targetSeasons, pos, config.gradCutoff, outLinks= outlinks_dict[p.key]
-                        if p.key in outlinks_keys else None, needsOutlinks= not isTR,
-                        requiredOutLinks=config.requiredOutLinks,
-                        ratingType=ratingType if (config.useWHR and not isTR) else None,
-                        maxRatingSE=config.maxRatingSE if (config.useWHR and not isTR) else None)
-                        and hasRating(p, ratingType, config)]
-    # Team ratings use the POINT estimate, not the interval lower bound the individual
-    # leaderboard uses. Subtracting 1.96*SE from every sailor ranks teams partly by how
-    # precisely their sailors are known, which systematically favours teams whose
-    # sailors race more: USC's top three had 65/56/29 races and Northeastern's 21/10/10,
-    # so USC won on lower bound (1799 vs 1790) while losing on point estimate
-    # (1863 vs 1895). The joint fit's point estimate is already shrunk toward the prior
-    # for low-data sailors, so the extra penalty is double counting.
-    if config.teamRatingUseLowerBound:
-        def value(p):
-            v = p.whrRating(ratingType, 'lcb') if config.useWHR else None
-            return v if v is not None else publishedRating(p, ratingType, config)
-    else:
-        value = lambda p: publishedRating(p, ratingType, config)
+                       if p.isRankEligible(config.targetSeasons, pos, config.gradCutoff,
+                                           needsOutlinks=False)
+                       and hasRating(p, ratingType, config)]
 
-    orderedSailors = sorted(eligible_people, key=value, reverse=True)
+    # Team ratings use their own statistic (default 'shrunk'), independent of what the
+    # individual leaderboard publishes.
+    stat = getattr(config, "teamRatingStatistic", "shrunk")
+    def teamValue(p):
+        v = p.whrRating(ratingType, stat) if config.useWHR else None
+        return v if v is not None else publishedRating(p, ratingType, config)
+
+    orderedSailors = sorted(eligible_people, key=teamValue, reverse=True)
     top = orderedSailors[:numTops]
 
-    # Sum and count are returned together so the caller can divide by the number of
-    # sailors actually found. Dividing by numTops regardless scored a missing sailor
-    # as a rating of ZERO rather than as unknown, which crushed thin rosters - 41 of
-    # 161 teams have fewer than three eligible open skippers.
-    sailorSum = sum(value(p) for p in top)
-    topSailors = [{'name': p.name, 'key': p.key, ratingType: value(p)} for p in top]
-    return topSailors, sailorSum, len(top)
+    popMean = None
+    for p in eligible_people:
+        popMean = p.whrRating(ratingType, "popmean")   # same for rating/shrunk
+        if popMean is not None:
+            break
+    if popMean is None:
+        popMean = config.whrTargetMean
+
+    sailorSum = sum(teamValue(p) for p in top)
+    sailorSum += (numTops - len(top)) * popMean
+    topSailors = [{'name': p.name, 'key': p.key,
+                   ratingType: publishedRating(p, ratingType, config)} for p in top]
+    return topSailors, sailorSum, numTops
+
 
 def calculateTopSailors(filtered_people, outlinks_dict, isTeamRace, isWomens, config: Config):
     prefix = 't' if isTeamRace else ''

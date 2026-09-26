@@ -51,7 +51,20 @@ class Config:
     runWHRFit : bool = True      # run the fit in main(); False reuses whr_*.parquet
     whrWCurve : float = 0.055    # Wiener drift per day, regatta-resolution curve
     whrWLevel : float = 0.6      # Wiener drift per season, level fit used for SEs
-    whrSigma0 : float = 3.0      # prior sd on a sailor's first rating
+    # Prior sd on a sailor's first rating. Chosen on overall held-out log-loss (tied
+    # best at 2.0) with the cross-region offset spread as the tie-break.
+    #
+    # Do NOT tighten this to suppress thin records. Shrinkage toward the global mean
+    # bites hardest on sailors with the least data, and race volume correlates with
+    # region - PCCSC sailors average 13 races and 2 regattas a season against NEISA's
+    # 9 and 1 - so tightening sigma0 quietly shifts the leaderboard toward the West
+    # Coast. Measured, NEISA+MAISA share of the top 100 falls from 78 at sigma0=3.0 to
+    # 72 at 0.75, and the region-offset spread rises from 0.18 to 0.38.
+    #
+    # Thin records are handled by whrRegattaNoiseFraction + the SE gate instead, which
+    # key off how much a record actually pins a sailor down (weak 7-boat fleet,
+    # undefeated -> SE 347) rather than off how much they raced.
+    whrSigma0 : float = 3.0
     whrWTR : float = 0.03        # team racing drift, tuned separately on held-out regattas
     whrSigma0TR : float = 1.0
     # Display scale. Anchored on ALL current-season sailors, which keeps the scale
@@ -70,9 +83,41 @@ class Config:
     # change who qualifies.
     maxRatingSEFraction : float = 0.25
 
+    # A sailor's races within one regatta share a weekend, a venue, a boat and a
+    # partner, so they are not independent samples of skill. Measured regatta-to-
+    # regatta scatter of a sailor's own rating is ~68 points on a 400-point spread,
+    # i.e. 0.17 sd; that much form/conditions noise is irreducible per regatta and the
+    # likelihood does not model it. It is added to each SE as
+    #     se_total^2 = se_model^2 + (frac*targetSd)^2 / nRegattas
+    # which barely touches a sailor with many regattas and substantially widens a
+    # sailor with one.
+    whrRegattaNoiseFraction : float = 0.0
+
+    # Minimum distinct regattas before a sailor appears on an official leaderboard.
+    # Left OFF: it is a volume rule, and volume correlates with region. At 2 it cut
+    # NEISA+MAISA from 72 to 57 of the eligible top 100 while PCCSC ended up with the
+    # LARGEST eligible pool despite NEISA having more sailors - the same failure mode
+    # as the old outLinks gate. The SE gate covers the same ground without the bias.
+    minRegattasRanked : int = 0
+
     # Individual leaderboards rank by the interval lower bound, so nobody tops the
     # chart off a handful of races. Team ratings average six sailors and use the point
     # estimate instead - see the note in Teams.getOrderedSailors.
+    # Which statistic the leaderboards sort and publish on.
+    #
+    #   'lcb'    rating - 1.96*SE      conservative; what the first WHR release used
+    #   'rating' the raw point estimate
+    #   'shrunk' empirical-Bayes posterior mean
+    #
+    # Individual rankings are back on 'lcb' and the raw rating: that combination is the
+    # one that read as most accurate in review, and the later "improvements" (shrinkage,
+    # tighter sigma0, a regatta minimum) each optimised a proxy metric while making the
+    # published list worse. Team ratings keep 'shrunk', which did measurably and
+    # visibly improve them.
+    rankingStatistic : str = 'lcb'
+    publishedStatistic : str = 'rating'
+    teamRatingStatistic : str = 'shrunk'
+
     teamRatingUseLowerBound : bool = False
 
     @property

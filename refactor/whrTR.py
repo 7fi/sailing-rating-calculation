@@ -224,7 +224,7 @@ def fitTRWithSE(rootDir="", ratingType="tsr", w=0.03, sigma0=1.0,
         return pd.DataFrame(), pd.DataFrame()
     info = (cur.groupby("node")
                .agg(sailorID=("sailorID", "first"), team=("team", "first"),
-                    matches=("node", "size"))
+                    matches=("node", "size"), regattas=("regatta", "nunique"))
                .reset_index()
                .groupby("sailorID", as_index=False).last())
     nodes = info["node"].to_numpy()
@@ -249,6 +249,18 @@ def fitTRWithSE(rootDir="", ratingType="tsr", w=0.03, sigma0=1.0,
     info["ratingType"] = ratingType
     info["rating"] = theta[nodes] * scale + offset
     info["se"] = ses * scale
+    # Empirical-Bayes shrinkage toward the population mean, by reliability:
+    #     shrunk = m + (rating - m) * tau2 / (tau2 + se^2)
+    # with tau2 = var(rating) - mean(se^2), the method-of-moments estimate of the true
+    # between-sailor variance. No free constant. This is the posterior mean under a
+    # normal prior, so it is the right point estimate to publish and to rank on:
+    # a sailor with one regatta regresses most of the way to average, while a
+    # well-measured sailor keeps their rating. It replaces ranking on rating - 1.96*SE,
+    # which penalised by uncertainty rather than regressing toward the mean.
+    m = float(info["rating"].mean())
+    tau2 = max(float(info["rating"].var()) - float((info["se"] ** 2).mean()), 1e-6)
+    info["shrunk"] = m + (info["rating"] - m) * tau2 / (tau2 + info["se"] ** 2)
+    info["popmean"] = m
     info["lcb"] = info["rating"] - 1.96 * info["se"]
     info["region"] = info["team"].map(teamRegions).replace(evaluation.REGION_MERGE)
     info = info.rename(columns={"matches": "races"}).drop(columns=["team"])

@@ -541,7 +541,8 @@ def fitAllFleet(rootDir="", w=0.055, sigma0=3.0, timeResolution="regatta",
 
 def fitWithSE(rootDir="", ratingType="sr", w=0.6, sigma0=3.0,
               targetSeasons=("s26", "f26"), maxiter=1500, verbose=True,
-              targetMean=1400.0, targetSd=400.0, postDf=None):
+              targetMean=1400.0, targetSd=400.0, postDf=None,
+              regattaNoiseFraction=0.17):
     """Season-resolution fit plus posterior SEs for the currently-ranked sailors.
 
     SEs are computed here rather than at regatta resolution because the quantity is
@@ -567,6 +568,7 @@ def fitWithSE(rootDir="", ratingType="sr", w=0.6, sigma0=3.0,
     info = (cur.groupby("node")
                .agg(sailorID=("sailorID", "first"), region=("region", "first"),
                     season=("season", "first"), races=("score", "size"),
+                    regattas=("regatta", "nunique"),
                     _t=("_t", "first"))
                .reset_index()            # keep `node` as a column, not the index
                .sort_values("_t")
@@ -602,7 +604,25 @@ def fitWithSE(rootDir="", ratingType="sr", w=0.6, sigma0=3.0,
     info = info.drop(columns=[c for c in ("_t", "node") if c in info.columns])
     info["ratingType"] = ratingType
     info["rating"] = theta[nodes] * scale + offset
-    info["se"] = ses * scale
+    # Add the per-regatta form/conditions noise the likelihood does not model. Races
+    # inside one regatta are not independent samples of skill, so a one-regatta record
+    # carries irreducible uncertainty no number of races can remove.
+    seModel = ses * scale
+    perRegatta = regattaNoiseFraction * targetSd
+    nreg = info["regattas"].to_numpy(float).clip(min=1.0)
+    info["se"] = np.sqrt(seModel ** 2 + (perRegatta ** 2) / nreg)
+    # Empirical-Bayes shrinkage toward the population mean, by reliability:
+    #     shrunk = m + (rating - m) * tau2 / (tau2 + se^2)
+    # with tau2 = var(rating) - mean(se^2), the method-of-moments estimate of the true
+    # between-sailor variance. No free constant. This is the posterior mean under a
+    # normal prior, so it is the right point estimate to publish and to rank on:
+    # a sailor with one regatta regresses most of the way to average, while a
+    # well-measured sailor keeps their rating. It replaces ranking on rating - 1.96*SE,
+    # which penalised by uncertainty rather than regressing toward the mean.
+    m = float(info["rating"].mean())
+    tau2 = max(float(info["rating"].var()) - float((info["se"] ** 2).mean()), 1e-6)
+    info["shrunk"] = m + (info["rating"] - m) * tau2 / (tau2 + info["se"] ** 2)
+    info["popmean"] = m
     info["lcb"] = info["rating"] - 1.96 * info["se"]
     return info
 
@@ -611,7 +631,8 @@ def runFleetPipeline(rootDir="", outDir=None, ratingTypes=FLEET_RATING_TYPES,
                      wCurve=0.055, wLevel=0.6, sigma0=3.0,
                      targetSeasons=("s26", "f26"), verbose=True,
                      anchors=None, targetMean=1400.0, targetSd=400.0, postDf=None,
-                     includeTR=True, trSeasons=("s26",), wTR=0.03, sigma0TR=1.0):
+                     includeTR=True, trSeasons=("s26",), wTR=0.03, sigma0TR=1.0,
+                     regattaNoiseFraction=0.17):
     """Produce everything the site needs, for every fleet rating type.
 
     Two fits per rating type, because they answer different questions:
@@ -642,7 +663,8 @@ def runFleetPipeline(rootDir="", outDir=None, ratingTypes=FLEET_RATING_TYPES,
         sailorFrames.append(fitWithSE(rootDir=rootDir, ratingType=rt, w=wLevel,
                                       sigma0=sigma0, targetSeasons=targetSeasons,
                                       verbose=verbose, targetMean=tm, targetSd=ts,
-                                      postDf=postDf))
+                                      postDf=postDf,
+                                      regattaNoiseFraction=regattaNoiseFraction))
 
     if includeTR:
         # Team racing is a different likelihood - 3v3 win/loss, so Bradley-Terry on the
@@ -708,6 +730,10 @@ def raceLadder(fit: FleetFit):
                        "raceNumber", "position", "score"]].copy()
     d["credit"] = fit.credit
     d["nodeRating"] = fit.rating          # constant within a (sailor, regatta) node
+    # Raw theta (log-odds) as well: pairwise probabilities are sigmoid(theta_i-theta_j),
+    # and with openskill off the oldMu column would otherwise sit at the prior and the
+    # evaluation harness would silently measure nothing.
+    d["theta"] = fit.theta[fit.data.rowNode]
     d["raceNumber"] = pd.to_numeric(d["raceNumber"], errors="coerce")
     d = d.sort_values(["sailorID", "regatta", "raceNumber", "raceID"], kind="stable")
 
