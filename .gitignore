@@ -20,3 +20,5 @@
 *.cpython-313.pyc
 .env
 verifier_output/
+/verifier_output
+*/verifier_output
