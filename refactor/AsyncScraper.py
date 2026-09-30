@@ -528,6 +528,28 @@ async def main(regattas):
         return allRows
 
 
+def dropRescrapedRegattas(df_races, df_new):
+    """Drop the stored rows of every regatta the scrape just re-read.
+
+    A fresh scrape of a regatta is the whole truth about it. Teams regularly enter the
+    wrong sailors for a race and fix the RP later, and the corrected page has no row at
+    all for the people who were taken off - so merging on (raceID, Sailor) never
+    overwrote their rows and left them in the file for good. Clearing the regatta first
+    means removed sailors, and races deleted outright, actually disappear.
+
+    Only regattas that produced rows are cleared. A regatta that was re-read but yielded
+    nothing (a parse failure, or scores pulled back off the site) keeps what it had,
+    rather than being emptied on the strength of a scrape that may have just failed.
+    """
+    if df_new.empty or df_races.empty:
+        return df_races
+
+    rescraped = set(df_new['Regatta'].unique())
+    stale = df_races['Regatta'].isin(rescraped)
+    print(f"Replacing {int(stale.sum())} stored rows across {len(rescraped)} re-scraped regattas")
+    return df_races.loc[~stale]
+
+
 def runFleetScrape(loadfile, outfile):
     print("----SCRAPING FLEET RACING----")
     start = time.time()
@@ -585,12 +607,16 @@ def runFleetScrape(loadfile, outfile):
 
     if len(regattas.values()) > 0:        
         totalRows = asyncio.run(main(regattas))
-        totalRows = [sub for row in totalRows for sub in row]
-        
+        # processFleetRegatta returns None for a regatta with no scores entered yet.
+        totalRows = [sub for row in totalRows if row for sub in row]
+
         with open("pages/scrape_state.json", "w") as f:
             json.dump(scrape_state, f, indent=2)
-            
-        df_races = pd.concat([df_races, pd.DataFrame(totalRows)])
+
+        df_new = pd.DataFrame(totalRows)
+        df_races = dropRescrapedRegattas(df_races, df_new)
+
+        df_races = pd.concat([df_races, df_new])
         df_races = df_races.drop_duplicates(subset=['raceID', 'Sailor'], keep='last').reset_index(drop=True)
         df_races["Date"] = pd.to_datetime(df_races["Date"], errors="raise")
         df_races["raceNum"] = pd.to_numeric(df_races["raceNum"], errors="raise")

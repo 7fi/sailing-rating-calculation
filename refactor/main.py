@@ -295,13 +295,27 @@ def main(rootDir : str = "", jupyter = False):
     updateSailorRatios(people)
     
     df_rivals = buildRivals(df_races_full, config)
+
+    # Every post-calc row has to still correspond to a scraped race entry. A team that
+    # fixes the wrong sailors it entered leaves no scraped row for the people taken off,
+    # so races not recalculated this run would otherwise carry their old rows forward.
+    validFrRows = set()
+    if not config.calcAll:
+        df_frSource = df_races_full.loc[df_races_full['Scoring'] != 'team']
+        validFrRows = set(zip(df_frSource['raceID'], df_frSource['key']))
+        del df_frSource
+
     del df_races_full
-    
+
     if not config.calcAll:
         df_oldFrPostCalcRaces = pd.read_parquet(rootDir + 'postcalcFRraces.parquet')
         existing_race_ids = set(race.get('raceID') for race in allFrRaces)
         new_rows = df_oldFrPostCalcRaces[~df_oldFrPostCalcRaces['raceID'].isin(existing_race_ids)]
-        allFrRaces.extend(new_rows.to_dict('records'))
+        carried = [r for r in new_rows.to_dict('records')
+                   if (r['raceID'], r['sailorID']) in validFrRows]
+        if len(carried) != len(new_rows):
+            print(f"Dropped {len(new_rows) - len(carried)} carried-forward fleet rows no longer in the scrape")
+        allFrRaces.extend(carried)
         del df_oldFrPostCalcRaces
     
         df_oldTrPostCalcRaces = pd.read_parquet(rootDir + 'postcalcTRraces.parquet')
