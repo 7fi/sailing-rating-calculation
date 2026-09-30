@@ -12,10 +12,10 @@ from calculationsTR import calculateTR
 
 from chatRivals import buildRivals, uploadRivals
 
-from uploadScores import uploadScoresBySailor, uploadAllScores, updateHomepageStats
+from uploadScores import uploadAllScores, updateHomepageStats
 from Teams import uploadTeams
 
-from Sailors import Sailor, setupPeople, handleMerges, outputSailorsToFile, calculateSailorRanks, uploadSailors, updateSailorRatios
+from Sailors import Sailor, setupPeople, handleMerges, loadRatingHistory, outputSailorsToFile, calculateSailorRanks, uploadSailors, updateSailorRatios
 from config import Config
 
 import pandas as pd
@@ -137,40 +137,70 @@ def calculateAllRegattaInfo(people, df_races, calculatedAtDict, config: Config):
 
     return regattaDict
 
+def regattaDate(regatta_data):
+    """Timestamp of a regatta, from whichever type the Date column happens to hold."""
+    date = regatta_data.iloc[0]['Date']
+    if type(date) == str:
+        fmt = "%Y-%m-%d %H:%M:%S" if len(date) != 10 else "%Y-%m-%d"
+        return datetime.strptime(date, fmt).timestamp()
+    if type(date) != float:
+        return date.timestamp()
+    return date
+
+def findResetDate(regatta_groups, ratingType, calculatedAtDict):
+    """Earliest date whose regatta data changed since it was last calculated.
+
+    Found up front, over every regatta, rather than latching onto the first stale one
+    encountered. Most dates carry several regattas (up to 19 in f25), and the sweep
+    resumes at a regatta boundary while the rollback happens at a date boundary. Taking
+    the minimum makes the two agree: everything from resetDate onward is recalculated,
+    and everything before it is left alone.
+    """
+    resetDate = None
+    for regatta_name, regatta_data in regatta_groups:
+        season = regatta_data.iloc[0]['raceID'].split("/")[0]
+        calculatedAt = calculatedAtDict.get(f"{ratingType}/{season}")
+        updatedAt = regatta_data.iloc[0]['updatedAt']
+
+        if calculatedAt is None or updatedAt > calculatedAt:
+            date = regattaDate(regatta_data)
+            if resetDate is None or date < resetDate:
+                resetDate = date
+    return resetDate
+
 def calcAllRacesForRT(ratingType, people, df_races, allFrRaces, allTrRaces, calculatedAtDict: dict, config: Config):
     print(f"Calculating all {ratingType} races")
     leng = len(df_races['adjusted_raceID'].unique())
     regatta_groups = df_races.groupby(['Regatta'], sort=False)
     
     i = 0
-    canSkipCalc = not config.calcAll
-    resetDate = None
-    
+
+    if config.calcAll:
+        resetDate = None
+    else:
+        resetDate = findResetDate(regatta_groups, ratingType, calculatedAtDict)
+        if resetDate is None:
+            print(f"Nothing to recalculate for {ratingType}")
+            return people, allFrRaces, allTrRaces
+        print(f"Recalculating {ratingType} from {resetDate} onward")
+
     for regatta_name, regatta_data in regatta_groups:
         season = regatta_data.iloc[0]['raceID'].split("/")[0]
         scoring = regatta_data.iloc[0]['scoring']
         womens = regatta_data.iloc[0]['womens']
-        date = regatta_data.iloc[0]['Date']
-        if type(date) == str:
-            format = "%Y-%m-%d %H:%M:%S" if len(date) != 10 else "%Y-%m-%d"
-            date = datetime.strptime(date, format).timestamp()
-        elif type(date) != float:
-            date = date.timestamp()
-        
-        if canSkipCalc:
-            updatedAt = regatta_data.iloc[0]['updatedAt']
-            calculatedAt = calculatedAtDict.setdefault(season)
-            
-            if calculatedAt is None or updatedAt > calculatedAt:
-                canSkipCalc = False
-                resetDate = date
-                print("Found point that needs to be calculated, resetting to before", date, ratingType)
-            else:
-                continue
+        date = regattaDate(regatta_data)
+
+        # Same boundary the ratings are rolled back to, so a regatta is never rolled
+        # back without also being recomputed.
+        if resetDate is not None and date < resetDate:
+            continue
 
         race_groups = regatta_data.groupby(['adjusted_raceID'], sort=False)
-        
-        calculatedAtDict[season] = time.time()
+
+        # Keyed by rating type AND season. Keying on season alone meant the first of the
+        # four passes (fr) stamped the checkpoint, so wfr/tr/wtr then saw it already set
+        # and skipped every regatta.
+        calculatedAtDict[f"{ratingType}/{season}"] = time.time()
         
         if scoring == 'team':
             regattaAvg = getRegAvgTR(people, womens,regatta_data, config)
@@ -186,7 +216,7 @@ def calcAllRacesForRT(ratingType, people, df_races, allFrRaces, allTrRaces, calc
 
             for pos in ['Skipper', 'Crew']:
                 if scoring == 'team':
-                    calculateTR(allTrRaces, people, resetDate, date, row, pos, season, regattaAvg, womens, config)
+                    calculateTR(allTrRaces, people, resetDate, date, row, pos, season, regattaAvg, womens, ratingType, config)
                 else:
                     calculateFR(allFrRaces, people, resetDate, date, regatta_name, raceID[0], row, pos, scoring, season, regattaAvg, womens, ratingType, config)
     return people, allFrRaces, allTrRaces
@@ -250,10 +280,16 @@ def load(rootDir : str, config: Config):
     df_races_full = df_races_full.sort_values(['Date', 'raceNum', 'Div']).reset_index(drop=True)
     
     df_sailor_ratings = None
+    df_oldFrPostCalc = None
+    df_oldTrPostCalc = None
     if not config.calcAll:
         # cutoff = (datetime.now() - timedelta(weeks=2))
         # df_races_full = df_races_full.loc[df_races_full['Date'] > cutoff]
         df_sailor_ratings = pd.read_json(rootDir + "sailors-latest.json")
+        # Read once here: needed both to rebuild rating history before the sweep and to
+        # carry forward rows afterwards.
+        df_oldFrPostCalc = pd.read_parquet(rootDir + 'postcalcFRraces.parquet')
+        df_oldTrPostCalc = pd.read_parquet(rootDir + 'postcalcTRraces.parquet')
 
     try:
         with open(rootDir + "calculated_at_dict.json", "r") as f:
@@ -261,14 +297,14 @@ def load(rootDir : str, config: Config):
     except FileNotFoundError:
         calculatedAtDict = {}
     
-    return df_races_full, df_sailor_info, df_sailor_ratings, calculatedAtDict
+    return df_races_full, df_sailor_info, df_sailor_ratings, df_oldFrPostCalc, df_oldTrPostCalc, calculatedAtDict
 # %%
 def main(rootDir : str = "", jupyter = False):
     # %% Load Files
     
     config : Config = Config()
 
-    df_races_full, df_sailor_info, df_sailor_ratings, calculatedAtDict = load(rootDir, config)
+    df_races_full, df_sailor_info, df_sailor_ratings, df_oldFrPostCalc, df_oldTrPostCalc, calculatedAtDict = load(rootDir, config)
     
     # df_races_full = df_races_full.loc[df_races_full['season'] == 'f25']
 
@@ -278,6 +314,9 @@ def main(rootDir : str = "", jupyter = False):
     people = setupPeople(df_sailor_ratings, df_sailor_info, config)
     del df_sailor_info, df_sailor_ratings
     people, df_races_full = handleMerges(df_races_full, people, config)
+
+    if not config.calcAll:
+        people = loadRatingHistory(people, pd.concat([df_oldFrPostCalc, df_oldTrPostCalc]), config)
     
     print("Setup complete.\nStarting calculations.")
     
@@ -292,8 +331,7 @@ def main(rootDir : str = "", jupyter = False):
     team_link_map = pd.Series(df_cleaned.Teamlink.values, index=df_cleaned.Team).to_dict()
     
     people = calculateSailorRanks(people, config)
-    updateSailorRatios(people)
-    
+
     df_rivals = buildRivals(df_races_full, config)
 
     # Every post-calc row has to still correspond to a scraped race entry. A team that
@@ -308,21 +346,19 @@ def main(rootDir : str = "", jupyter = False):
     del df_races_full
 
     if not config.calcAll:
-        df_oldFrPostCalcRaces = pd.read_parquet(rootDir + 'postcalcFRraces.parquet')
         existing_race_ids = set(race.get('raceID') for race in allFrRaces)
-        new_rows = df_oldFrPostCalcRaces[~df_oldFrPostCalcRaces['raceID'].isin(existing_race_ids)]
+        new_rows = df_oldFrPostCalc[~df_oldFrPostCalc['raceID'].isin(existing_race_ids)]
         carried = [r for r in new_rows.to_dict('records')
                    if (r['raceID'], r['sailorID']) in validFrRows]
         if len(carried) != len(new_rows):
             print(f"Dropped {len(new_rows) - len(carried)} carried-forward fleet rows no longer in the scrape")
         allFrRaces.extend(carried)
-        del df_oldFrPostCalcRaces
-    
-        df_oldTrPostCalcRaces = pd.read_parquet(rootDir + 'postcalcTRraces.parquet')
+
         existing_race_ids = set(race.get('raceID') for race in allTrRaces)
-        new_rows = df_oldTrPostCalcRaces[~df_oldTrPostCalcRaces['raceID'].isin(existing_race_ids)]
+        new_rows = df_oldTrPostCalc[~df_oldTrPostCalc['raceID'].isin(existing_race_ids)]
         allTrRaces.extend(new_rows.to_dict('records'))
-        del  df_oldTrPostCalcRaces
+
+    del df_oldFrPostCalc, df_oldTrPostCalc
     
     df_frAfter = pd.DataFrame(allFrRaces)
     df_trAfter = pd.DataFrame(allTrRaces)
@@ -336,6 +372,9 @@ def main(rootDir : str = "", jupyter = False):
     combined['position'] = combined['position'].apply(lambda x: x.lower())
     
     winp_dict = combined.loc[combined['ratio'] >= 0].groupby(['sailorID', 'position', 'season'])['ratio'].mean().to_dict()
+
+    # Needs `combined`, so it runs here rather than beside calculateSailorRanks.
+    updateSailorRatios(people, combined)
     
     counts = combined.groupby(['sailorID', 'position', 'season']).size()
 

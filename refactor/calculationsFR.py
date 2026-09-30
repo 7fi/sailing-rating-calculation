@@ -5,6 +5,15 @@ from Sailors import Sailor
 from openskill.models import PlackettLuceRating
 import time
 
+def regionOf(team):
+    """Conference for a team name, or None if unknown.
+
+    PCCSC and NWICSA are treated as one region: the whole west coast should not count
+    as cross-regional against itself for rating purposes.
+    """
+    reg = teamRegions.get(team)
+    return 'PCCSC' if reg == 'NWICSA' else reg
+
 def updateRatings(racers : list[Sailor], ratings : list[PlackettLuceRating], pos, womens):
     for racer, new_rating in zip(racers, ratings):
         if pos == 'Skipper':
@@ -22,19 +31,23 @@ def updateSeasons(sailor, season, team, pos):
     if season not in [s[0] for s in sailor.seasons[pos.lower()]]:
         sailor.seasons[pos.lower()].append((season, team))
 
-def updateCrossLinks(sailor, isCross, regions, race, config : Config):
+def updateCrossLinks(sailor, team, isCross, regions, race, config : Config):
     outLinks = 0
-    
-    if sailor.teams[-1] not in teamRegions.keys():
-        print("Sailor's team not found in global team region list", sailor.teams[-1], race)
+
+    # `team` is the team this sailor sailed for in THIS race. Using sailor.teams[-1]
+    # (their most recent team) would misattribute every race a transfer sailed before
+    # transferring.
+    sailorReg = regionOf(team)
+
+    if sailorReg is None:
+        print("Sailor's team not found in global team region list", team, race)
         return outLinks
     if None in regions:
         # print("None found in list of regions!!!")
         return outLinks
-    
+
     # Only calculate number of cross regional sailors if it is the current season
     doCr = race.split("/")[0] in config.targetSeasons and isCross == 1
-    sailorReg = ('PCCSC' if teamRegions[sailor.teams[-1]] == 'NWICSA' else teamRegions[sailor.teams[-1]])
     
     if isCross: # and doCr
         # Calculate the number of sailors that are not in the sailor's region
@@ -45,29 +58,30 @@ def updateCrossLinks(sailor, isCross, regions, race, config : Config):
     
     return outLinks
 
-def updateRaces(newRaces, venue, actualIDs, penalties, racers : list[Sailor], scoreVals, predictions, partnerKeys, partnerNames, startingRating, ratings, teams, teamBoatNames, boatType, race, scoring, season, date, womens, regattaAvg, pos, config : Config):
+def updateRaces(newRaces, venue, actualIDs, penalties, racers : list[Sailor], scoreVals, predictions, partnerKeys, partnerNames, startingRating, startingMuSigma, ratings, teams, teamBoatNames, boatType, race, scoring, season, date, womens, regattaAvg, pos, config : Config):
     if pos.lower() not in ['skipper', 'crew']:
         print("Pos is weird value in updateRaces ", pos)
 
-    # Make list of regions and combine PCCSC and NWICSA (those shouldnt count as cross regional for rating purposes)
-    regions = [teamRegions[p.teams[-1]] if p.teams[-1]
-               in teamRegions.keys() else None for p in racers]
-    regions = ['PCCSC' if reg == 'NWICSA' else reg for reg in regions]
+    # Regions of everyone in this race, from the team each sailed for AT THE TIME
+    # (the row's Team), not their most recent team.
+    regions = [regionOf(t) for t in teams]
 
     # Check if race has any out of conference sailors
     isCross = True if len(set(regions)) > 1 else False
 
     # Loop through each sailor and the associated values
-    for sailor, actualID, score, penalty, pred, partnerKey, partnerName, oldRating, new_rating, team, teamBoatName in zip(racers, actualIDs, scoreVals, penalties, predictions, partnerKeys, partnerNames, startingRating, ratings, teams, teamBoatNames):
+    for sailor, actualID, score, penalty, pred, partnerKey, partnerName, oldRating, oldMuSigma, new_rating, team, teamBoatName in zip(racers, actualIDs, scoreVals, penalties, predictions, partnerKeys, partnerNames, startingRating, startingMuSigma, ratings, teams, teamBoatNames):
 
-        outLinks = updateCrossLinks(sailor, isCross, regions, race, config)
+        outLinks = updateCrossLinks(sailor, team, isCross, regions, race, config)
 
         updateSeasons(sailor, season, team, pos)
 
         ratingType = ('w' if womens else '') + ('s' if pos.lower() == 'skipper' else 'c') + 'r'
-        
-        sailor.outLinks += outLinks
-        
+
+        # NOTE: sailor.outLinks is incremented inside updateCrossLinks. Do not add it
+        # again here - that double-counted it, making the DB value 2x the parquet sum
+        # and the effective eligibility threshold 75 rather than 150.
+
         newRaces.append({
             'raceID': actualID,
             'season': actualID.split("/")[0],
@@ -89,13 +103,30 @@ def updateRaces(newRaces, venue, actualIDs, penalties, racers : list[Sailor], sc
             'boatName': teamBoatName,
             'ratingType': ratingType,
             'oldRating': oldRating,
-            'newRating': new_rating[0].ordinal(target=config.targetElo, alpha=200 / config.model.sigma),
+            'newRating': new_rating[0].ordinal(target=config.targetElo, alpha=config.alpha),
+            'oldMu': oldMuSigma[0],
+            'oldSigma': oldMuSigma[1],
+            'newMu': new_rating[0].mu,
+            'newSigma': new_rating[0].sigma,
             'regAvg': regattaAvg,
             'outLinks': outLinks,
             'calculatedAt': time.time()
         })
 
-def getRacers(people : list[Sailor], names, keys, teams, regatta, resetDate, date, ratingType):
+        sailor.recordRating(ratingType, date, new_rating[0].mu, new_rating[0].sigma)
+
+def resetRacers(racers : list[Sailor], resetDate, ratingType, config : Config):
+    """Roll each racer's rating back to just before resetDate, once per rating type."""
+    if resetDate is None:
+        return
+
+    for racer in racers:
+        if ratingType in racer.ratingTypesReset:
+            continue
+
+        racer.resetRatingToBeforeDate(resetDate, ratingType, config)
+
+def getRacers(people : list[Sailor], names, keys, teams, regatta, resetDate, date, ratingType, config : Config):
     racers = []
     try:
         racers = [people[key] if key != 'Unknown'
@@ -105,15 +136,7 @@ def getRacers(people : list[Sailor], names, keys, teams, regatta, resetDate, dat
         print(regatta)
         raise e
 
-    # Handle resetting if necessary: 
-    if resetDate is None:
-        return racers
-
-    for racer in racers:
-        if ratingType in racer.ratingTypesReset:
-            continue
-        
-        racer.resetRatingToBeforeDate(resetDate, ratingType)
+    resetRacers(racers, resetDate, ratingType, config)
 
     return racers
 
@@ -153,21 +176,32 @@ def calculateFR(newRaces : list, people : dict[str, Sailor], resetDate, date, re
     # the first row's, or every sailor gets recorded in the first row's division.
     actualIDs = list(scores['raceID'])
 
-    racers : list[Sailor] = getRacers(people, names, keys, teams, regatta, resetDate, date, ratingType)
+    racers : list[Sailor] = getRacers(people, names, keys, teams, regatta, resetDate, date, ratingType, config)
 
     ratings = [[r.getRating(pos, 'fleet', womens)] for r in racers]
 
     startingRating = [r[0].ordinal(target=config.targetElo, alpha=config.alpha) for r in ratings]
+    # ordinal = alpha*(mu - 3*sigma) + targetElo is one equation in two unknowns, so the
+    # raw (mu, sigma) has to be recorded separately or the rating cannot be restored on a
+    # resume. Captured here because `ratings` is rebound to the new ratings below.
+    startingMuSigma = [(r[0].mu, r[0].sigma) for r in ratings]
 
     # Determine active racers (those without penalties) for rating calculation
     active_mask = [p not in excusedPenalties for p in penalties]
     active_ratings = [r for r, m in zip(ratings, active_mask) if m]
-    active_scores = [s for s, m in zip(scoreVals, active_mask) if m]
+    # Finishing places, lower-is-better. openskill's `ranks` uses that convention;
+    # its `scores` parameter is the OPPOSITE (higher-is-better), so always pass this
+    # by the `ranks` keyword or the whole model silently inverts.
+    active_places = [s for s, m in zip(scoreVals, active_mask) if m]
 
     if len(active_ratings) < 2:
         return
 
-    active_ratings = config.model.rate(active_ratings, active_scores)
+    # Predict BEFORE rating, or the "prediction" has already seen the result.
+    # calculationsTR.calculateTR is the reference pattern.
+    predictions = config.model.predict_rank(ratings)
+
+    active_ratings = config.model.rate(active_ratings, ranks=active_places)
 
     # Reconstruct full ratings list with updates only for active racers
     new_ratings = []
@@ -180,8 +214,6 @@ def calculateFR(newRaces : list, people : dict[str, Sailor], resetDate, date, re
 
     ratings = new_ratings
 
-    predictions = config.model.predict_rank(ratings)
-
     updateRatings(racers, ratings, pos, womens)
     
-    updateRaces(newRaces, venue, actualIDs, penalties, racers, scoreVals, predictions, partnerKeys, partnerNames, startingRating, ratings, teams, teamBoatNames, boatType, race, scoring, season, date, womens, regattaAvg, pos, config)
+    updateRaces(newRaces, venue, actualIDs, penalties, racers, scoreVals, predictions, partnerKeys, partnerNames, startingRating, startingMuSigma, ratings, teams, teamBoatNames, boatType, race, scoring, season, date, womens, regattaAvg, pos, config)

@@ -11,8 +11,10 @@ def getOrderedSailors(people : list[Sailor], ratingType, pos, outlinks_dict, con
     isTR = 't' in ratingType
     outlinks_keys = outlinks_dict.keys()
     eligible_people = [p for p in people
-                        if p.isRankEligible(config.targetSeasons, pos, config.gradCutoff, outLinks= outlinks_dict[p.key] 
-                        if p.key in outlinks_keys else None, needsOutlinks= not isTR)
+                        if p.isRankEligible(config.targetSeasons, pos, config.gradCutoff,
+                                            config.requiredOutLinks,
+                                            outLinks=outlinks_dict[p.key] if p.key in outlinks_keys else None,
+                                            needsOutlinks=not isTR)
                         and getattr(p, ratingType).mu != config.model.mu]
     orderedSailors = sorted(eligible_people,
                             key=lambda x: getattr(x, ratingType).ordinal(

@@ -24,11 +24,16 @@ class Config:
         'olivia-figley-2026': 'olivia-figley',
         'Winter vetrone-Northeastern': 'winter-vetrone',
         'pierce-olsen-2029' : "pierce-olsen",
-        'fynn-olsen-2029' : 'fynn-olsen',
+        # 'fynn-olsen-2029' : 'fynn-olsen',
         'marcus-abate-2020' : 'marcus-abate'
     }
     numTops : ClassVar[dict[str, int]] = {'fr': {'open': 3, 'womens': 2}, 'tr': {'open': 3, 'womens': 3}}
-    requiredOutLinks : int = 120
+    # Cross-region comparison threshold for rank eligibility, and the only place it is
+    # set. It read 120 here but went unused while Sailors.isRankEligible hardcoded 150 -
+    # against a sailor.outLinks that was double-counted, so the bar actually applied was
+    # 75. Kept at 75 to leave the published leaderboard unchanged now that outLinks is
+    # counted once.
+    requiredOutLinks : int = 75
     
     # frfile = 'racesfrtest.parquet'
     frfile = 'racesfr.parquet'
@@ -39,4 +44,4 @@ class Config:
     
     doScrape : bool = False
     calcAll : bool = True
-    doUpload : bool = True
+    doUpload : bool = False

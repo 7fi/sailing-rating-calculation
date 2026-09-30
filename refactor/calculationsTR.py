@@ -1,5 +1,5 @@
 from config import Config
-from calculationsFR import updateSeasons
+from calculationsFR import updateSeasons, resetRacers
 from Sailors import Sailor
 import time
 
@@ -60,7 +60,7 @@ def getTeamVals(row, people : dict[str, Sailor], rowVal : str, rowBoatVal : str,
     
     return teamName, teamRacers, teamRatings
 
-def updateRacesForTeam(allRaces : list[dict], tLetter, index, racers, oppRacers, boats, starting, teamName, pos, season, womens, row, date, predictions, venue, regattaAvg, ratings, config : Config):
+def updateRacesForTeam(allRaces : list[dict], tLetter, index, racers, oppRacers, boats, starting, startingMuSigma, teamName, pos, season, womens, row, date, predictions, venue, regattaAvg, ratings, config : Config):
     oLetter = 'A' if tLetter == 'B' else 'B'
     tscore = row['team' + tLetter + 'Score'].iat[0]
     toutcome = row['team'+ tLetter + 'Outcome'].iat[0]
@@ -71,7 +71,7 @@ def updateRacesForTeam(allRaces : list[dict], tLetter, index, racers, oppRacers,
 
     new_ratings = [r.ordinal(target=config.targetElo, alpha=config.alpha) for r in ratings]
 
-    for racer, partnerKey, partnerName, oldRating, new_rating in zip(racers, partnerKeys, partnerNames, starting, new_ratings):
+    for racer, partnerKey, partnerName, oldRating, oldMuSigma, new_rating, ratingObj in zip(racers, partnerKeys, partnerNames, starting, startingMuSigma, new_ratings, ratings):
 
         partnerKey = partnerKey if partnerKey not in config.merges.keys() else config.merges[partnerKey]
 
@@ -126,18 +126,36 @@ def updateRacesForTeam(allRaces : list[dict], tLetter, index, racers, oppRacers,
             'ratingType': ratingType,
             'oldRating': oldRating,
             'newRating': new_rating,
+            'oldMu': oldMuSigma[0],
+            'oldSigma': oldMuSigma[1],
+            'newMu': ratingObj.mu,
+            'newSigma': ratingObj.sigma,
             'regAvg': regattaAvg,
             'calculatedAt': time.time()
         })
 
-def calculateTR(allRaces : list[dict], people : dict[str, Sailor], resetDate, date : str, row, pos : str, season : str, regattaAvg : float, womens : bool, config : Config):
+        racer.recordRating(ratingType, date, ratingObj.mu, ratingObj.sigma)
+
+def calculateTR(allRaces : list[dict], people : dict[str, Sailor], resetDate, date : str, row, pos : str, season : str, regattaAvg : float, womens : bool, ratingType : str, config : Config):
     venue = row['Venue'].iat[0]
+
+    # resetDate was accepted but ignored here, so team ratings were never rolled back on
+    # a resume. Reset before reading the ratings, or the fetched values are post-update.
+    if resetDate is not None:
+        posKey = pos.lower() + 'Key'
+        trKeys = [config.merges.get(boat[posKey], boat[posKey])
+                  for boat in list(row['teamABoats'].iat[0]) + list(row['teamBBoats'].iat[0])
+                  if boat[posKey] is not None]
+        resetRacers([people[k] for k in trKeys if k in people], resetDate, ratingType, config)
 
     teamAName, teamARacers, teamARatings = getTeamVals(row, people, 'teamAName', 'teamABoats', womens, pos, config)
     teamBName, teamBRacers, teamBRatings = getTeamVals(row, people, 'teamBName', 'teamBBoats', womens, pos, config)
 
     startingARating = [r.ordinal(target=config.targetElo, alpha=config.alpha) for r in teamARatings]
     startingBRating = [r.ordinal(target=config.targetElo, alpha=config.alpha) for r in teamBRatings]
+    # Raw (mu, sigma) as well: the ordinal alone cannot be inverted back to rating state.
+    startingAMuSigma = [(r.mu, r.sigma) for r in teamARatings]
+    startingBMuSigma = [(r.mu, r.sigma) for r in teamBRatings]
 
     if len(teamARatings) < 1 or len(teamBRatings) < 1:
         # print("not enough sailors in this race, skipping", row['raceID'].iat[0])
@@ -153,6 +171,6 @@ def calculateTR(allRaces : list[dict], people : dict[str, Sailor], resetDate, da
     updateRatings(womens, teamARacers, teamARatings, pos)
     updateRatings(womens, teamBRacers, teamBRatings, pos)
     
-    updateRacesForTeam(allRaces, 'A', 0, teamARacers, teamBRacers, row['teamABoats'].iat[0], startingARating, teamAName, pos, season, womens, row, date, predictions, venue, regattaAvg, teamARatings, config)
-    
-    updateRacesForTeam(allRaces, 'B', 1, teamBRacers, teamARacers, row['teamBBoats'].iat[0], startingBRating, teamBName, pos, season, womens, row, date, predictions, venue, regattaAvg, teamBRatings, config)
+    updateRacesForTeam(allRaces, 'A', 0, teamARacers, teamBRacers, row['teamABoats'].iat[0], startingARating, startingAMuSigma, teamAName, pos, season, womens, row, date, predictions, venue, regattaAvg, teamARatings, config)
+
+    updateRacesForTeam(allRaces, 'B', 1, teamBRacers, teamARacers, row['teamBBoats'].iat[0], startingBRating, startingBMuSigma, teamBName, pos, season, womens, row, date, predictions, venue, regattaAvg, teamBRatings, config)
