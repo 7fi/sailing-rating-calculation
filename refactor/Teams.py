@@ -4,37 +4,68 @@ import datetime
 import pandas as pd
 import numpy as np
 import mysql
-from Sailors import Sailor
+from Sailors import Sailor, rankingKey, hasRating, publishedRating
 
 def getOrderedSailors(people : list[Sailor], ratingType, pos, outlinks_dict, config : Config):
+    """Each school's top N sailors for one rating type, and their rating sum.
+
+    Two deliberate differences from the individual leaderboard:
+
+    * **No uncertainty gate.** Measured against actual cross-region regatta results,
+      applying the SE gate here made things worse (PCCSC bias +0.112 vs +0.084),
+      because it strips a team's weaker sailors and leaves only their best. The gate
+      exists to decide who is confidently *ranked*, not how strong a team is.
+    * **A missing top-N slot counts as the population mean**, not as zero and not as
+      absent. Dividing by numTops regardless scored a thin roster as if its third
+      sailor had a rating of 0; dividing by however many were found rewarded thin
+      rosters instead, letting a team with two strong sailors and no depth outrank a
+      team with three.
+
+    Ordering and summing both use publishedRating, i.e. the empirical-Bayes shrunk
+    estimate, so a sailor with one regatta contributes close to average rather than
+    at face value.
+    """
     numTops = config.numTops['tr' if 't' in ratingType else 'fr']['open' if 'w' not in ratingType else 'womens']
     isTR = 't' in ratingType
-    outlinks_keys = outlinks_dict.keys()
     eligible_people = [p for p in people
-                        if p.isRankEligible(config.targetSeasons, pos, config.gradCutoff,
-                                            config.requiredOutLinks,
-                                            outLinks=outlinks_dict[p.key] if p.key in outlinks_keys else None,
-                                            needsOutlinks=not isTR)
-                        and getattr(p, ratingType).mu != config.model.mu]
-    orderedSailors = sorted(eligible_people,
-                            key=lambda x: x.publishedRating(ratingType, config),
-                            reverse=True)
+                       if p.isRankEligible(config.targetSeasons, pos, config.gradCutoff,
+                                           needsOutlinks=False)
+                       and hasRating(p, ratingType, config)]
 
-    sailorSum = sum([p.publishedRating(ratingType, config)
-                            for p in orderedSailors[:numTops]])
+    # Team ratings use their own statistic (default 'shrunk'), independent of what the
+    # individual leaderboard publishes.
+    stat = getattr(config, "teamRatingStatistic", "shrunk")
+    def teamValue(p):
+        v = p.whrRating(ratingType, stat) if config.useWHR else None
+        return v if v is not None else publishedRating(p, ratingType, config)
+
+    orderedSailors = sorted(eligible_people, key=teamValue, reverse=True)
+    top = orderedSailors[:numTops]
+
+    popMean = None
+    for p in eligible_people:
+        popMean = p.whrRating(ratingType, "popmean")   # same for rating/shrunk
+        if popMean is not None:
+            break
+    if popMean is None:
+        popMean = config.whrTargetMean
+
+    sailorSum = sum(teamValue(p) for p in top)
+    sailorSum += (numTops - len(top)) * popMean
     topSailors = [{'name': p.name, 'key': p.key,
-                    ratingType: p.publishedRating(ratingType, config)} for p in orderedSailors[:numTops]]
-    return topSailors, sailorSum
+                   ratingType: publishedRating(p, ratingType, config)} for p in top]
+    return topSailors, sailorSum, numTops
+
 
 def calculateTopSailors(filtered_people, outlinks_dict, isTeamRace, isWomens, config: Config):
     prefix = 't' if isTeamRace else ''
     if isWomens:
         prefix = 'w' + prefix
-    topSkippers, topSkippersSum = getOrderedSailors(filtered_people, prefix + 'sr', 'skipper', outlinks_dict, config)
-    topCrews, topCrewsSum = getOrderedSailors(filtered_people, prefix + 'cr', 'crew', outlinks_dict, config)
+    topSkippers, topSkippersSum, nSkippers = getOrderedSailors(filtered_people, prefix + 'sr', 'skipper', outlinks_dict, config)
+    topCrews, topCrewsSum, nCrews = getOrderedSailors(filtered_people, prefix + 'cr', 'crew', outlinks_dict, config)
 
-    numTops = config.numTops['tr' if isTeamRace else 'fr']['womens' if isWomens else 'open']
-    topRating = (topSkippersSum + topCrewsSum) / (numTops * 2)
+    found = nSkippers + nCrews
+    topRating = (topSkippersSum + topCrewsSum) / found if found else 0
     return topRating, topSkippers, topCrews
 
 def getRankType(sailor, season, topSailors, rankTypes, config: Config):
@@ -109,16 +140,24 @@ def calculateAvgRatio(filtered_people: list[Sailor], winp_dict):
         avgRatio = 0
     return avgRatio
 
+FLEET_TYPES = ('sr', 'cr', 'wsr', 'wcr')
+TEAM_TYPES = ('tsr', 'tcr', 'wtsr', 'wtcr')
+
+
 def calculateAvgRating(people : list[Sailor], config:Config):
+    """Mean over sailors of their best fleet rating and their best team-race rating.
+
+    Goes through publishedRating, so it follows whichever model is in use. It used to
+    read the openskill ordinals directly - and the team-race block actually read the
+    FLEET attributes, so team ratings never contributed and fleet ones were counted
+    twice.
+    """
     ratings = []
     for p in people:
-        fleet = [p.publishedRating(rt, config) for rt in ('sr', 'cr', 'wsr', 'wcr')]
-        ratings.append(max([v if v != config.targetElo else 0 for v in fleet]))
-
-        # Was reading the fleet attributes here, so avgRating counted fleet ratings
-        # twice and team-race ratings never.
-        team = [p.publishedRating(rt, config) for rt in ('tsr', 'tcr', 'wtsr', 'wtcr')]
-        ratings.append(max([v if v != config.targetElo else 0 for v in team]))
+        for group in (FLEET_TYPES, TEAM_TYPES):
+            vals = [publishedRating(p, rt, config) for rt in group
+                    if hasRating(p, rt, config)]
+            ratings.append(max(vals) if vals else 0)
 
     return sum(ratings) / len(ratings) if len(ratings) > 0 else 0
     

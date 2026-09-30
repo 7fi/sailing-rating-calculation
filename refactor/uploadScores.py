@@ -17,6 +17,104 @@ def updateHomepageStats(connection):
         
     connection.commit()
 
+
+def uploadScoresBySailor(people : dict[str,Sailor], connection, batch_size=10000):
+    fleet_rows = []
+    team_rows = []
+
+    for index, (key, sailor) in enumerate(people.items()):
+        if index % 1000 == 0:
+            print(f"Processing sailor {sailor.name} {index}/{len(people)}")
+        
+        races = sailor.races
+        
+        for race in races:
+            raceID_parts = race['raceID'].split("/")
+            if race['type'] == 'fleet':
+                fleet_rows.append([
+                    raceID_parts[0],               # season
+                    raceID_parts[1],               # regatta
+                    raceID_parts[2][:-1],          # raceNumber
+                    raceID_parts[2][-1],           # division
+                    key,
+                    race['partner']['key'],
+                    race['partner']['name'],
+                    race['score'],
+                    race['predicted'],
+                    race['ratio'],
+                    '',                             # penalty
+                    race['pos'],
+                    race['date'],
+                    race['scoring'],
+                    race['venue'],
+                    '',                             # boat
+                    race['boatName'],
+                    race['ratingType'],
+                    race['oldRating'],
+                    race['newRating'],
+                    race['regAvg']
+                ])
+            elif race['type'] == 'team':
+                team_rows.append([
+                    raceID_parts[0],               # season
+                    raceID_parts[1],               # regatta
+                    raceID_parts[2],               # raceNumber
+                    race['round'],
+                    key,
+                    race['partner']['key'],
+                    race['partner']['name'],
+                    race['opponentTeam'],
+                    race['opponentNick'],
+                    race['score'],
+                    race['outcome'],
+                    race['predicted'],
+                    '',                             # penalty
+                    race['pos'],
+                    race['date'],
+                    race['venue'],
+                    '',                             # boat
+                    '',                             # boatName
+                    race['ratingType'],
+                    race['oldRating'],
+                    race['newRating'],
+                    race['regAvg']
+                ])
+    
+    def batch_insert(table_name, columns, data):
+        for start in range(0, len(data), batch_size):
+            print("Inserting", start, "/", len(data))
+            batch = data[start:start + batch_size]
+            placeholders = ",".join(["%s"] * len(columns))
+            updates = ",".join([f"{col} = VALUES({col})" for col in columns])
+            sql = f"""INSERT INTO {table_name} ({','.join(columns)}) VALUES ({placeholders})
+                        ON DUPLICATE KEY UPDATE
+                            {updates}"""
+            with connection.cursor() as cursor:
+                cursor.executemany(sql, batch)
+            connection.commit()
+            
+    
+    fleet_columns = [
+        'season', 'regatta', 'raceNumber', 'division', 'sailorID', 'partnerID', 'partnerName',
+        'score', 'predicted', 'ratio', 'penalty', 'position', 'date', 'scoring', 'venue',
+        'boat','boatName', 'ratingType', 'oldRating', 'newRating', 'regAvg'
+    ]
+    team_columns = [
+        'season', 'regatta', 'raceNumber', 'round', 'sailorID', 'partnerID', 'partnerName',
+        'opponentTeam', 'opponentNick', 'score', 'outcome', 'predicted', 'penalty', 'position',
+        'date', 'venue', 'boat', 'boatName', 'ratingType', 'oldRating', 'newRating', 'regAvg'
+    ]
+    
+    print("Inserting FleetScores...")
+    batch_insert("FleetScores", fleet_columns, fleet_rows)
+    
+    print("Inserting TRScores...")
+    batch_insert("TRScores", team_columns, team_rows)
+    
+    updateHomepageStats(connection)
+    # cursor.close()
+    print("Upload complete.")
+
 def batch_insert(table_name, columns, data, connection, batch_size=10_000):
     for start in range(0, len(data), batch_size):
         print("Inserting", start, "/", len(data))
@@ -33,62 +131,12 @@ def batch_insert(table_name, columns, data, connection, batch_size=10_000):
             cursor.executemany(sql, batch)
     connection.commit()
 
-def loadInfileSql(path, table, cols):
-    return f"""
-            LOAD DATA LOCAL INFILE '{path}'
-            REPLACE INTO TABLE {table}
-            FIELDS TERMINATED BY '\t'
-            LINES TERMINATED BY '\n'
-            ({','.join(cols)})
-            """
-
-
-def deleteStaleScores(table, keyCols, cols, csvPath, upload_df, connection, batch_size=200):
-    """Delete rows of the just-uploaded regattas that this upload no longer accounts for.
-
-    LOAD DATA ... REPLACE only overwrites a row whose key an incoming row collides with.
-    When a team fixes the wrong sailors they had entered for a race, the corrected scrape
-    contains no row at all for the people who were taken off, so nothing ever collides
-    with their rows and they stay in the table for good. Reload the upload into a
-    temporary copy of the table and delete whatever the real table holds beyond it.
-
-    Scoped to the (season, regatta) pairs actually in the upload, so a run covering only
-    some regattas reconciles just those instead of deleting every regatta it was never
-    asked about. The temp table is referenced once per statement - MySQL cannot open a
-    temporary table twice in one query.
-    """
-    temp = f"tmp_{table}"
-    keyMatch = " AND ".join(f"s.{c} = t.{c}" for c in keyCols)
-    scope = list(upload_df[['season', 'regatta']].drop_duplicates().itertuples(index=False, name=None))
-
-    removed = 0
-    with connection.cursor() as cursor:
-        cursor.execute(f"DROP TEMPORARY TABLE IF EXISTS {temp}")
-        # LIKE carries over the primary key, so the NOT EXISTS probe below is an index lookup.
-        cursor.execute(f"CREATE TEMPORARY TABLE {temp} LIKE {table}")
-        cursor.execute(loadInfileSql(csvPath, temp, cols))
-
-        for start in range(0, len(scope), batch_size):
-            batch = scope[start:start + batch_size]
-            pairs = ",".join(["(%s,%s)"] * len(batch))
-            cursor.execute(f"""
-                DELETE t FROM {table} t
-                WHERE (t.season, t.regatta) IN ({pairs})
-                  AND NOT EXISTS (SELECT 1 FROM {temp} s WHERE {keyMatch})
-            """, [v for pair in batch for v in pair])
-            removed += cursor.rowcount
-
-        cursor.execute(f"DROP TEMPORARY TABLE IF EXISTS {temp}")
-    connection.commit()
-    print(f"Removed {removed} stale rows from {table} across {len(scope)} regattas")
-
-
 def uploadAllScores(allFrRows, allTrRows, connection, batch_size=10_000):
-
+    
     fleet_columns = [
         'season', 'regatta', 'raceNumber', 'division', 'sailorID', 'partnerID', 'partnerName',
         'score', 'predicted', 'ratio', 'penalty', 'position', 'date', 'scoring', 'venue',
-        'boat','boatName', 'ratingType', 'oldRating', 'newRating', 'regAvg'
+        'boat','boatName', 'ratingType', 'oldRating', 'newRating', 'regAvg', 'credit'
     ]
     
     team_columns = [
@@ -97,22 +145,24 @@ def uploadAllScores(allFrRows, allTrRows, connection, batch_size=10_000):
         'date', 'venue', 'boat', 'boatName', 'ratingType', 'oldRating', 'newRating', 'regAvg'
     ]
     
-    # The primary key of each table, and so what identifies a row when reconciling below.
-    # TRScores is left alone for now - fleet racing first.
-    fleet_key = ['season', 'regatta', 'raceNumber', 'division', 'sailorID']
-    team_key = None
-
     print(allFrRows.columns)
-    for upload_df, table, cols, keyCols in zip([allFrRows, allTrRows],
-                                      ['FleetScores', 'TRScores'], [fleet_columns, team_columns],
-                                      [fleet_key, team_key]):
+    for upload_df, table, cols in zip([allFrRows, allTrRows],
+                                      ['FleetScores', 'TRScores'], [fleet_columns, team_columns]):
         upload_df = upload_df.reindex(columns=cols)
         upload_df['date'] = pd.to_datetime(upload_df['date'], unit='s')
 
-        # na_rep below writes \N, which LOAD DATA only reads as NULL while it is left
-        # unescaped. QUOTE_NONE escaping would turn it into the literal string "\N", so
-        # refuse rather than quietly writing that.
-        nullCols = [c for c in cols if upload_df[c].isna().any()]
+        # NULLs cannot be written as \N here: QUOTE_NONE with escapechar='\\' escapes
+        # the backslash, so \N reaches the file as \\N and LOAD DATA reads it as the
+        # literal two-character string, which a FLOAT column rejects with
+        # "Incorrect FLOAT value: '\\N'". Nullable columns are therefore written as the
+        # empty string (which needs no escaping) and mapped back to NULL through a user
+        # variable and NULLIF in the LOAD DATA statement below.
+        #
+        # `credit` is legitimately absent - team races have no joint fit, and neither
+        # does a fleet row the fit skipped. Every other column must be populated, since
+        # an empty string there would be silently coerced rather than rejected.
+        nullable = [c for c in ('credit',) if c in cols]
+        nullCols = [c for c in cols if c not in nullable and upload_df[c].isna().any()]
         if nullCols:
             raise ValueError(f"Null values in {table} columns {nullCols}; LOAD DATA cannot represent them here")
 
@@ -123,18 +173,29 @@ def uploadAllScores(allFrRows, allTrRows, connection, batch_size=10_000):
             # (so Tyler "TMAC" Macdonald landed in the DB as "Tyler ""TMAC"" Macdonald"),
             # and it leaves backslashes unescaped for LOAD DATA to swallow (so O\'Connell
             # became O'Connell). QUOTE_NONE with escapechar makes the two sides agree.
-            upload_df.to_csv(temp_file.name, index=False, header=False, sep='\t', na_rep='\\N',
+            upload_df.to_csv(temp_file.name, index=False, header=False, sep='\t', na_rep='',
                              encoding='utf-8', quoting=csv.QUOTE_NONE, escapechar='\\')
             temp_file.flush() # Ensure all data is written to disk
 
+            # Nullable columns are read into a user variable so an empty field becomes
+            # a real NULL instead of being coerced to 0.
+            loadCols = [f'@{c}' if c in nullable else c for c in cols]
+            setClause = ', '.join(f'{c} = NULLIF(@{c}, \'\')' for c in nullable)
+
             # 3. The SQL Command
             # Use REPLACE to handle the "Update" logic you had before
+            sql = f"""
+            LOAD DATA LOCAL INFILE '{temp_file.name}'
+            REPLACE INTO TABLE {table}
+            FIELDS TERMINATED BY '\t'
+            LINES TERMINATED BY '\n'
+            ({','.join(loadCols)})
+            {'SET ' + setClause if setClause else ''}
+            """
+        
             with connection.cursor() as cursor:
-                cursor.execute(loadInfileSql(temp_file.name, table, cols))
+                cursor.execute(sql)
             connection.commit()
-
-            if keyCols:
-                deleteStaleScores(table, keyCols, cols, temp_file.name, upload_df, connection)
-
+    
     # batch_insert("FleetScores", fleet_columns, allFrRows, connection, batch_size)
     # batch_insert("TRScores", team_columns, allTrRows, connection, batch_size)
