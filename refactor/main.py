@@ -11,6 +11,7 @@ from calculationsFR import calculateFR
 from calculationsTR import calculateTR
 
 from chatRivals import buildRivals, uploadRivals
+from regionOffsets import computeRegionOffsets, applyRegionOffsets
 
 from uploadScores import uploadAllScores, updateHomepageStats
 from Teams import uploadTeams
@@ -330,18 +331,19 @@ def main(rootDir : str = "", jupyter = False):
         subset=['Team', 'Teamlink']).drop_duplicates(subset='Team', keep='first')
     team_link_map = pd.Series(df_cleaned.Teamlink.values, index=df_cleaned.Team).to_dict()
     
-    people = calculateSailorRanks(people, config)
-
     df_rivals = buildRivals(df_races_full, config)
 
     # Every post-calc row has to still correspond to a scraped race entry. A team that
     # fixes the wrong sailors it entered leaves no scraped row for the people taken off,
     # so races not recalculated this run would otherwise carry their old rows forward.
     validFrRows = set()
+    df_frSource = df_races_full.loc[df_races_full['Scoring'] != 'team']
     if not config.calcAll:
-        df_frSource = df_races_full.loc[df_races_full['Scoring'] != 'team']
         validFrRows = set(zip(df_frSource['raceID'], df_frSource['key']))
-        del df_frSource
+
+    # Kept past the del: the region-offset fit needs each sailor's contemporaneous team.
+    df_regionSource = df_frSource[['raceID', 'key', 'Team']].copy()
+    del df_frSource
 
     del df_races_full
 
@@ -364,6 +366,18 @@ def main(rootDir : str = "", jupyter = False):
     df_trAfter = pd.DataFrame(allTrRaces)
     
     del allFrRaces, allTrRaces
+
+    # Region offsets, then ranks. Ranking happens after this so it sees the corrected
+    # ratings; the fit needs the fully assembled frame, which is why it sits here rather
+    # than beside the sweep.
+    if config.useRegionOffsets:
+        print("Fitting region offsets")
+        offsets = computeRegionOffsets(df_frAfter, df_regionSource, config)
+        people = applyRegionOffsets(people, offsets, config)
+    del df_regionSource
+
+    people = calculateSailorRanks(people, config)
+
     # %%
     outlinks_dict = df_frAfter.groupby('sailorID')['outLinks'].sum().to_dict()
     

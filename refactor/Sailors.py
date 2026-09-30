@@ -53,6 +53,11 @@ class Sailor:
     
     ratingTypesReset : list[str] = field(default_factory=list)
 
+    # {ratingType: offset in rating points} from the fitted region offsets, or empty.
+    # Kept beside the rating rather than folded into mu: mu/sigma are persisted and
+    # reloaded on a resume, so baking the offset in would compound it every run.
+    regionOffsets : dict[str, float] = field(default_factory=dict)
+
     # {ratingType: [(date, mu, sigma), ...]} in chronological order. Compact on purpose:
     # storing the full race dicts here meant ~1.5M dicts held in 26k objects.
     ratingHistory : dict[str, list[tuple[float, float, float]]] = field(default_factory=dict)
@@ -122,6 +127,17 @@ class Sailor:
         self.womenSkipperRankTR = 0
         self.womenCrewRankTR = 0
         
+    def publishedRating(self, ratingType, config : Config):
+        """The rating to display and rank on: openskill ordinal plus any region offset.
+
+        One number for both, deliberately. Ranking on something other than the number
+        shown is what makes a leaderboard read as arbitrary.
+        """
+        base = getattr(self, ratingType).ordinal(target=config.targetElo, alpha=config.alpha)
+        if not config.useRegionOffsets:
+            return base
+        return base + self.regionOffsets.get(ratingType, 0.0)
+
     def totalRaces(self):
         return sum(len(v) for v in self.ratingHistory.values())
 
@@ -300,22 +316,14 @@ def outputSailorsToFile(people, rootDir, config: Config ):
                         p.womenCrewRank, p.skipperRankTR, p.womenSkipperRankTR, p.crewRankTR, p.womenCrewRankTR,
                         p.teams,
                         p.gender,
-                        p.sr.ordinal(target=config.targetElo,
-                                     alpha=config.alpha),
-                        p.cr.ordinal(target=config.targetElo,
-                                     alpha=config.alpha),
-                        p.wsr.ordinal(target=config.targetElo,
-                                      alpha=config.alpha),
-                        p.wcr.ordinal(target=config.targetElo,
-                                      alpha=config.alpha),
-                        p.tsr.ordinal(target=config.targetElo,
-                                      alpha=config.alpha),
-                        p.tcr.ordinal(target=config.targetElo,
-                                      alpha=config.alpha),
-                        p.wtsr.ordinal(target=config.targetElo,
-                                       alpha=config.alpha),
-                        p.wtcr.ordinal(target=config.targetElo,
-                                       alpha=config.alpha),
+                        p.publishedRating('sr', config),
+                        p.publishedRating('cr', config),
+                        p.publishedRating('wsr', config),
+                        p.publishedRating('wcr', config),
+                        p.publishedRating('tsr', config),
+                        p.publishedRating('tcr', config),
+                        p.publishedRating('wtsr', config),
+                        p.publishedRating('wtcr', config),
                         p.sr.mu, p.sr.sigma,
                         p.cr.mu, p.cr.sigma,
                         p.wsr.mu, p.wsr.sigma,
@@ -376,24 +384,32 @@ def calculateSailorRanks(people : dict[str,Sailor], config : Config):
     for p in people.values():
         p.resetRanks()
 
-    for i, s in enumerate(sorted([p for p in eligible_skippers if p.sr.mu != config.model.mu], key=lambda p: p.sr.ordinal(), reverse=True)):
+    for i, s in enumerate(sorted([p for p in eligible_skippers if p.sr.mu != config.model.mu],
+                              key=lambda p: p.publishedRating('sr', config), reverse=True)):
         s.skipperRank = i + 1
-    for i, s in enumerate(sorted([p for p in eligible_crews if p.cr.mu != config.model.mu], key=lambda p: p.cr.ordinal(), reverse=True)):
+    for i, s in enumerate(sorted([p for p in eligible_crews if p.cr.mu != config.model.mu],
+                              key=lambda p: p.publishedRating('cr', config), reverse=True)):
         s.crewRank = i + 1
 
-    for i, s in enumerate(sorted([p for p in eligible_skippers if p.wsr.mu != config.model.mu], key=lambda p: p.wsr.ordinal(), reverse=True)):
+    for i, s in enumerate(sorted([p for p in eligible_skippers if p.wsr.mu != config.model.mu],
+                              key=lambda p: p.publishedRating('wsr', config), reverse=True)):
         s.womenSkipperRank = i + 1
-    for i, s in enumerate(sorted([p for p in eligible_crews if p.wcr.mu != config.model.mu], key=lambda p: p.wcr.ordinal(), reverse=True)):
+    for i, s in enumerate(sorted([p for p in eligible_crews if p.wcr.mu != config.model.mu],
+                              key=lambda p: p.publishedRating('wcr', config), reverse=True)):
         s.womenCrewRank = i + 1
 
-    for i, s in enumerate(sorted([p for p in eligible_skippers_tr if p.tsr.mu != config.model.mu], key=lambda p: p.tsr.ordinal(), reverse=True)):
+    for i, s in enumerate(sorted([p for p in eligible_skippers_tr if p.tsr.mu != config.model.mu],
+                              key=lambda p: p.publishedRating('tsr', config), reverse=True)):
         s.skipperRankTR = i + 1
-    for i, s in enumerate(sorted([p for p in eligible_crews_tr if p.tcr.mu != config.model.mu], key=lambda p: p.tcr.ordinal(), reverse=True)):
+    for i, s in enumerate(sorted([p for p in eligible_crews_tr if p.tcr.mu != config.model.mu],
+                              key=lambda p: p.publishedRating('tcr', config), reverse=True)):
         s.crewRankTR = i + 1
 
-    for i, s in enumerate(sorted([p for p in eligible_skippers_tr if p.wtsr.mu != config.model.mu], key=lambda p: p.wtsr.ordinal(), reverse=True)):
+    for i, s in enumerate(sorted([p for p in eligible_skippers_tr if p.wtsr.mu != config.model.mu],
+                              key=lambda p: p.publishedRating('wtsr', config), reverse=True)):
         s.womenSkipperRankTR = i + 1
-    for i, s in enumerate(sorted([p for p in eligible_crews_tr if p.wtcr.mu != config.model.mu], key=lambda p: p.wtcr.ordinal(), reverse=True)):
+    for i, s in enumerate(sorted([p for p in eligible_crews_tr if p.wtcr.mu != config.model.mu],
+                              key=lambda p: p.publishedRating('wtcr', config), reverse=True)):
         s.womenCrewRankTR = i + 1
     
     return people
@@ -472,14 +488,14 @@ def uploadSailors(people, connection, config : Config, batch_size=300):
             p.key.replace("/", "-"),
             p.name,
             p.gender,
-            int(p.sr.ordinal(target=config.targetElo, alpha=config.alpha)),
-            int(p.cr.ordinal(target=config.targetElo, alpha=config.alpha)),
-            int(p.wsr.ordinal(target=config.targetElo, alpha=config.alpha)),
-            int(p.wcr.ordinal(target=config.targetElo, alpha=config.alpha)),
-            int(p.tsr.ordinal(target=config.targetElo, alpha=config.alpha)),
-            int(p.tcr.ordinal(target=config.targetElo, alpha=config.alpha)),
-            int(p.wtsr.ordinal(target=config.targetElo, alpha=config.alpha)),
-            int(p.wtcr.ordinal(target=config.targetElo, alpha=config.alpha)),
+            int(p.publishedRating('sr', config)),
+            int(p.publishedRating('cr', config)),
+            int(p.publishedRating('wsr', config)),
+            int(p.publishedRating('wcr', config)),
+            int(p.publishedRating('tsr', config)),
+            int(p.publishedRating('tcr', config)),
+            int(p.publishedRating('wtsr', config)),
+            int(p.publishedRating('wtcr', config)),
             int(p.skipperRank),
             int(p.crewRank),
             int(p.womenSkipperRank),

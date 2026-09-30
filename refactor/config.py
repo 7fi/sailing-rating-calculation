@@ -42,6 +42,17 @@ class Config:
     
     sailorInfoFile = 'sailor_data2.parquet'
     
+    # --- fitted region offsets (see regionOffsets.py) -------------------------------
+    # Off by default: switching this on moves published ratings between conferences.
+    useRegionOffsets : bool = False
+    # Seasons pooled for the fit. Per-season fits move by 43-62 points (sd) against a
+    # 3.5-6.7 point standard error, so a single season is too unstable to trust; the
+    # pooled window is the version that was validated out of sample.
+    regionOffsetSeasons : ClassVar[list[str]] = ['f24', 's25', 'f25', 's26']
+    # Global damping on the fitted offsets. 1.0 applies them as measured; lower values
+    # apply a fraction while the effect is being assessed.
+    regionOffsetWeight : float = 1.0
+
     doScrape : bool = False
     calcAll : bool = True
     doUpload : bool = False

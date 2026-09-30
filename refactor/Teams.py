@@ -17,14 +17,13 @@ def getOrderedSailors(people : list[Sailor], ratingType, pos, outlinks_dict, con
                                             needsOutlinks=not isTR)
                         and getattr(p, ratingType).mu != config.model.mu]
     orderedSailors = sorted(eligible_people,
-                            key=lambda x: getattr(x, ratingType).ordinal(
-                                target=config.targetElo, alpha=config.alpha),
+                            key=lambda x: x.publishedRating(ratingType, config),
                             reverse=True)
 
-    sailorSum = sum([getattr(p, ratingType).ordinal(target=config.targetElo, alpha=config.alpha)
+    sailorSum = sum([p.publishedRating(ratingType, config)
                             for p in orderedSailors[:numTops]])
     topSailors = [{'name': p.name, 'key': p.key,
-                    ratingType: getattr(p, ratingType).ordinal(target=config.targetElo, alpha=config.alpha)} for p in orderedSailors[:numTops]]
+                    ratingType: p.publishedRating(ratingType, config)} for p in orderedSailors[:numTops]]
     return topSailors, sailorSum
 
 def calculateTopSailors(filtered_people, outlinks_dict, isTeamRace, isWomens, config: Config):
@@ -113,23 +112,13 @@ def calculateAvgRatio(filtered_people: list[Sailor], winp_dict):
 def calculateAvgRating(people : list[Sailor], config:Config):
     ratings = []
     for p in people:
-        sr = p.sr.ordinal(target=config.targetElo, alpha=config.alpha)
-        cr = p.cr.ordinal(target=config.targetElo, alpha=config.alpha)
-        wsr = p.wsr.ordinal(target=config.targetElo, alpha=config.alpha)
-        wcr = p.wcr.ordinal(target=config.targetElo, alpha=config.alpha)
-        ratings.append(max([sr if sr != config.targetElo else 0, 
-                         cr if cr != config.targetElo else 0, 
-                         wsr if wsr != config.targetElo else 0, 
-                         wcr if wcr != config.targetElo else 0]))
-        
-        tsr = p.sr.ordinal(target=config.targetElo, alpha=config.alpha)
-        tcr = p.cr.ordinal(target=config.targetElo, alpha=config.alpha)
-        wtsr = p.wsr.ordinal(target=config.targetElo, alpha=config.alpha)
-        wtcr = p.wcr.ordinal(target=config.targetElo, alpha=config.alpha)
-        ratings.append(max([tsr if tsr != config.targetElo else 0, 
-                         tcr if tcr != config.targetElo else 0, 
-                         wtsr if wtsr != config.targetElo else 0, 
-                         wtcr if wtcr != config.targetElo else 0]))
+        fleet = [p.publishedRating(rt, config) for rt in ('sr', 'cr', 'wsr', 'wcr')]
+        ratings.append(max([v if v != config.targetElo else 0 for v in fleet]))
+
+        # Was reading the fleet attributes here, so avgRating counted fleet ratings
+        # twice and team-race ratings never.
+        team = [p.publishedRating(rt, config) for rt in ('tsr', 'tcr', 'wtsr', 'wtcr')]
+        ratings.append(max([v if v != config.targetElo else 0 for v in team]))
 
     return sum(ratings) / len(ratings) if len(ratings) > 0 else 0
     
