@@ -298,16 +298,26 @@ def setupPeople(df_sailor_ratings, df_sailor_info, config: Config):
 def handleMerges(df_races, people, config : Config):
     # merge sailor objects
     for oldkey, newkey in config.merges.items():
-        if oldkey in people.keys():
-            new = people[newkey]
-            old = people[oldkey]
+        if oldkey not in people:
+            continue
+
+        old = people.pop(oldkey)
+        new = people.get(newkey)
+
+        if new is None:
+            # The merge target does not exist as its own sailor, e.g. config.merges maps
+            # fynn-olsen-2029 -> fynn-olsen but only the dated key was ever scraped.
+            # Indexing people[newkey] here raised KeyError on every run, full or
+            # incremental. Re-key the existing record instead.
+            old.key = newkey
+            people[newkey] = old
+        else:
             new.links = new.links + old.links
             if old.teams != new.teams:
                 new.teams = new.teams + old.teams
-            del people[oldkey]
-            
-            df_races['Link'] = df_races['Link'].replace(oldkey, newkey)
-            df_races['key'] = df_races['key'].replace(oldkey, newkey)
+
+        df_races['Link'] = df_races['Link'].replace(oldkey, newkey)
+        df_races['key'] = df_races['key'].replace(oldkey, newkey)
     return people, df_races
         
 def validPerson(p, type, config: Config):
@@ -743,15 +753,17 @@ ALTER TABLE FleetScores
 
 
 def applyWHRToRaces(df_frAfter: pd.DataFrame, rootDir, config: Config,
-                    whrFile="whr_races.parquet"):
+                    whrFile="whr_races.parquet", label="fleet"):
     """Overlay the joint fit's per-race ladder onto the fleet score rows.
 
     Replaces oldRating/newRating/predicted with the joint-fit values and adds
     `credit`. The ladder is built so newRating - oldRating == credit, so the existing
     "rating gained this race" display keeps working with no front-end change.
 
-    Rows with no joint fit (team races, or fleet rows the fit skipped) keep their
-    openskill values and get a NULL credit.
+    Used for both the fleet and the team-race score rows; whrTR.trLadder builds the
+    team-race side of the ladder to the same contract. Rows with no joint fit (boats
+    with no sailor key, or fields the fit skipped) keep their openskill values and get
+    a NULL credit.
     """
     import os
     path = rootDir + whrFile
@@ -768,6 +780,20 @@ def applyWHRToRaces(df_frAfter: pd.DataFrame, rootDir, config: Config,
     except Exception:
         w = pd.read_parquet(path, columns=cols)
     key = ["raceID", "sailorID", "position", "ratingType"]
+    # The ladder can carry more than one row per key when the scrape lists a sailor
+    # twice in one match - seen on both sides of a team race, or twice in the same
+    # boat. Left-merging that fans the score rows out, so collapse first: a duplicate
+    # key means the source data is wrong, and multiplying score rows is worse than
+    # picking one of them.
+    # Rows with no sailorID cannot match a score row (team-race boats whose key was
+    # never scraped), and they collide with each other on the merge key, so drop them
+    # before counting real duplicates.
+    w = w[w["sailorID"].notna()]
+    dupes = int(w.duplicated(subset=key).sum())
+    if dupes:
+        print(f"  {dupes} duplicate ladder rows collapsed "
+              f"(a sailor listed twice in one field - a scrape error)")
+        w = w.drop_duplicates(subset=key)
     merged = df_frAfter.merge(w, on=key, how="left", suffixes=("", "_whr"))
 
     hit = merged["credit"].notna()
@@ -782,5 +808,13 @@ def applyWHRToRaces(df_frAfter: pd.DataFrame, rootDir, config: Config,
         merged["oldSigma"] = np.where(hit, 0.0, merged.get("oldSigma", 0.0))
         merged = merged.drop(columns=["theta"])
     merged = merged.drop(columns=[c for c in merged.columns if c.endswith("_whr")])
-    print(f"Applied WHR per-race ratings to {int(hit.sum()):,} of {len(merged):,} fleet rows.")
+
+    # TRScores.predicted is 'win'/'lose', while the ladder carries it as 1.0/0.0 so the
+    # shared whr_races column stays numeric alongside fleet finishing places.
+    if label == "team-race":
+        merged["predicted"] = np.where(hit,
+                                       np.where(merged["predicted"] == 1.0, "win", "lose"),
+                                       merged["predicted"])
+
+    print(f"Applied WHR per-race ratings to {int(hit.sum()):,} of {len(merged):,} {label} rows.")
     return merged

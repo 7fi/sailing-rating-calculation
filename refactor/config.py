@@ -22,13 +22,17 @@ class Config:
         'kaelyn-holmes-2029': 'kaelyn-holmes',
         'Nathalie Caudron-Northeastern': 'nathalie-caudron', 
         'olivia-figley-2026': 'olivia-figley',
-        'Winter vetrone-Northeastern': 'winter-vetrone'
+        'Winter vetrone-Northeastern': 'winter-vetrone',
+        'pierce-olsen-2029' : "pierce-olsen",
+        # Safe to re-enable now that handleMerges tolerates a missing merge target.
+        # 'fynn-olsen-2029' : 'fynn-olsen',
+        'marcus-abate-2020' : 'marcus-abate'
     }
     numTops : ClassVar[dict[str, int]] = {'fr': {'open': 3, 'womens': 2}, 'tr': {'open': 3, 'womens': 3}}
 
     # Number of out-of-region opponents a sailor must have faced to be officially
     # ranked. Read by Sailor.isRankEligible.
-    requiredOutLinks : int = 150
+    requiredOutLinks : int = 75   # fallback only; the SE gate governs when a fit exists
 
     # Iterating the openskill sweep. Measured NOT to fix the cross-region bias (it is a
     # magnitude-of-level-transfer problem, not a direction-of-time one), so these stay
@@ -114,9 +118,23 @@ class Config:
     # tighter sigma0, a regatta minimum) each optimised a proxy metric while making the
     # published list worse. Team ratings keep 'shrunk', which did measurably and
     # visibly improve them.
-    rankingStatistic : str = 'lcb'
+    # 'rating', not 'lcb': ranking on the lower bound while publishing the point
+    # estimate puts a sailor showing 1900 below one showing 1850, which is the
+    # objection RatingSystem.md raises. With the SE gate active the two order almost
+    # identically (spearman 0.9964, mean 20 ranks, vs 45 ranks ungated) - the gate
+    # does the work, not the subtraction.
+    rankingStatistic : str = 'rating'
     publishedStatistic : str = 'rating'
     teamRatingStatistic : str = 'shrunk'
+    # Team racing uses the UNSHRUNK rating, and must. A 3v3 match only ever observes
+    # the combined strength of three sailors, so an individual theta has SE ~= 1.00 sd
+    # while the mean of three is ~0.36 sd - the aggregate is identified even though the
+    # split is not. Empirical-Bayes shrinkage is computed per sailor, and for TR
+    # var(rating) < mean(se^2), so tau2 clamps to its floor and the shrink factor is
+    # ~4e-12: every sailor collapses onto the population mean and every team published
+    # exactly 1400. Shrinking individuals first destroys precisely the information the
+    # top-N sum would have recovered.
+    teamRatingStatisticTR : str = 'rating'
 
     teamRatingUseLowerBound : bool = False
 

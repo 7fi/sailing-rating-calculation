@@ -14,6 +14,10 @@ It is fun to see how each race changes your rating number, not just suddenly jum
 
 I'm not sure how that would really work for crowsnest though, where we display a visible rating number. If people are ranked on the hidden rating, then it is confusing why some people are ranked higher even though they have a lower visible number so this solution is not ideal.
 
+#### Objectivity
+
+I like that the current rating system is fairly objective. I don't want any magic numbers, or subjective conference penalties, the rating system should just run and work.
+
 ### Downsides of current rating system
 
 #### Lack of conference mixing

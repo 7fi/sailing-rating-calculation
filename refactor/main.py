@@ -354,9 +354,14 @@ def main(rootDir : str = "", jupyter = False):
                                  wTR=config.whrWTR, sigma0TR=config.whrSigma0TR,
                                  regattaNoiseFraction=config.whrRegattaNoiseFraction)
         people = loadWHRRatings(people, rootDir, config)
-        df_frAfter = applyWHRToRaces(df_frAfter, rootDir, config)
+        df_frAfter = applyWHRToRaces(df_frAfter, rootDir, config, label="fleet")
+        # Team racing needs this too. Without it the TR score rows kept whatever the
+        # skipped openskill pass left behind, which was a constant 1000 for every
+        # sailor in every match - the rating never moved.
+        df_trAfter = applyWHRToRaces(df_trAfter, rootDir, config, label="team-race")
     else:
         df_frAfter['credit'] = np.nan
+        df_trAfter['credit'] = np.nan
 
     # Ranks come last, since with useWHR on they are ordered by the joint fit's
     # interval lower bound.

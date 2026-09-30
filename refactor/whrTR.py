@@ -175,6 +175,83 @@ def fitTR(data: TRData, w=0.055, sigma0=3.0, activeMask=None, theta0=None,
     return res.x, res
 
 
+def rowCreditTR(theta, data: TRData, w, sigma0):
+    """Per-match credit: how much each match pulls one sailor's team-race rating.
+
+    Same influence-function approximation the fleet fit uses in whr.rowCredit,
+
+        credit = (dlogL_match / dtheta_n) / H_nn
+
+    specialised to the 3v3 Bradley-Terry likelihood. With
+    ``z = sum(theta_A) - theta_B`` and ``p = sigmoid(z)``, the per-match residual
+    ``r = y - p`` is dlogL/dz, and dz/dtheta is +1 for every sailor on side A and -1 for
+    every sailor on side B. So all three sailors on a side receive the same credit -
+    which is the honest answer, because a 3v3 result only ever observes the combined
+    strength of the three and carries no information about which of them earned it.
+
+    Returns an array aligned to ``data.rows``, whose block order is
+    (A, boat0), (A, boat1), (A, boat2), (B, boat0), (B, boat1), (B, boat2).
+    """
+    aN, bN, y = data.aNodes, data.bNodes, data.y
+    z = theta[aN].sum(axis=1) - theta[bN].sum(axis=1)
+    p = expit(z)
+    r = y - p
+
+    # Curvature: each participating node has (dz/dtheta)^2 = 1, so contributes p(1-p).
+    hDiag = np.zeros_like(theta)
+    pv = p * (1.0 - p)
+    np.add.at(hDiag, aN.ravel(), np.repeat(pv, 3))
+    np.add.at(hDiag, bN.ravel(), np.repeat(pv, 3))
+
+    # Prior curvature, exactly as in whr.rowCredit.
+    prec = 1.0 / (w * w * data.priorDt)
+    np.add.at(hDiag, data.priorA, prec)
+    np.add.at(hDiag, data.priorB, prec)
+    np.add.at(hDiag, data.firstNode, 1.0 / (sigma0 * sigma0))
+
+    rowGrad = np.concatenate([np.tile(r, 3), np.tile(-r, 3)])
+    rowNode = np.concatenate([aN[:, 0], aN[:, 1], aN[:, 2],
+                              bN[:, 0], bN[:, 1], bN[:, 2]])
+    return rowGrad / np.maximum(hDiag[rowNode], 1e-9), rowNode
+
+
+def trLadder(data: TRData, theta, credit, rowNode, scale, offset):
+    """Per-match rating ladder for team racing, mirroring whr.raceLadder.
+
+    Walks each sailor through each regatta so that ``newRating - oldRating == credit``
+    for every match and the walk lands exactly on that regatta's fitted rating. Without
+    this the TR score rows carried whatever the (skipped) openskill pass left behind,
+    which was a constant 1000 for every sailor in every match.
+    """
+    d = data.rows.copy()
+    d["credit"] = credit * scale
+    d["nodeRating"] = theta[rowNode] * scale + offset
+    # Raw theta as well: pairwise probabilities are sigmoid of theta differences, and
+    # with openskill off the oldMu column would otherwise sit at the prior.
+    d["theta"] = theta[rowNode]
+
+    # Did the fit expect this side to win? Kept NUMERIC (1.0 win / 0.0 lose) because
+    # whr_races.parquet holds fleet rows in the same column as an integer finishing
+    # place, and a mixed int/str column cannot be written to parquet. Sailors
+    # .applyWHRToRaces maps it back to 'win'/'lose' for the team-race score rows.
+    aSum = theta[data.aNodes].sum(axis=1)
+    bSum = theta[data.bNodes].sum(axis=1)
+    ownSum = np.concatenate([np.tile(aSum, 3), np.tile(bSum, 3)])
+    oppSum = np.concatenate([np.tile(bSum, 3), np.tile(aSum, 3)])
+    d["predicted"] = np.where(ownSum > oppSum, 1.0, 0.0)
+
+    # A match number is not in the flattened rows, so order within a regatta by raceID,
+    # which carries the sequence.
+    d = d.sort_values(["sailorID", "regatta", "raceID"], kind="stable")
+
+    g = d.groupby(["sailorID", "regatta"], sort=False)["credit"]
+    total = g.transform("sum")
+    creditBefore = g.cumsum() - d["credit"]
+    d["oldRating"] = d["nodeRating"] - total + creditBefore
+    d["newRating"] = d["oldRating"] + d["credit"]
+    return d
+
+
 def buildHessianTR(theta, data: TRData, w, sigma0, activeMask=None):
     """Laplace precision: sum_m p(1-p) (e_A - e_B)(e_A - e_B)^T, plus the prior."""
     import scipy.sparse as sp
@@ -265,10 +342,12 @@ def fitTRWithSE(rootDir="", ratingType="tsr", w=0.03, sigma0=1.0,
     info["region"] = info["team"].map(teamRegions).replace(evaluation.REGION_MERGE)
     info = info.rename(columns={"matches": "races"}).drop(columns=["team"])
 
-    races = data.rows.copy()
-    races["rating"] = theta[data.rowNode] * scale + offset if hasattr(data, "rowNode") \
-        else theta[races["node"].to_numpy()] * scale + offset
-    races = races.drop(columns=["node"])
+    # Per-match ladder, so the TR score rows carry a real rating that moves between
+    # matches instead of whatever the skipped openskill pass left behind.
+    credit, rowNode = rowCreditTR(theta, data, w, sigma0)
+    races = trLadder(data, theta, credit, rowNode, scale, offset)
+    races["rating"] = races["nodeRating"]
+    races = races.drop(columns=["node"], errors="ignore")
     return info, races
 
 

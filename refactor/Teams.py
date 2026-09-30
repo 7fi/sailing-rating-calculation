@@ -32,9 +32,11 @@ def getOrderedSailors(people : list[Sailor], ratingType, pos, outlinks_dict, con
                                            needsOutlinks=False)
                        and hasRating(p, ratingType, config)]
 
-    # Team ratings use their own statistic (default 'shrunk'), independent of what the
-    # individual leaderboard publishes.
-    stat = getattr(config, "teamRatingStatistic", "shrunk")
+    # Team ratings use their own statistic, independent of what the individual
+    # leaderboard publishes - and team racing needs a different one from fleet, because
+    # its per-sailor shrinkage collapses onto the population mean (see config).
+    stat = getattr(config, "teamRatingStatisticTR", "rating") if isTR \
+        else getattr(config, "teamRatingStatistic", "shrunk")
     def teamValue(p):
         v = p.whrRating(ratingType, stat) if config.useWHR else None
         return v if v is not None else publishedRating(p, ratingType, config)
@@ -54,15 +56,26 @@ def getOrderedSailors(people : list[Sailor], ratingType, pos, outlinks_dict, con
     sailorSum += (numTops - len(top)) * popMean
     topSailors = [{'name': p.name, 'key': p.key,
                    ratingType: publishedRating(p, ratingType, config)} for p in top]
-    return topSailors, sailorSum, numTops
+    # len(top) is reported so the caller can tell a genuinely mid-table team from one
+    # whose every slot was filled at the population mean.
+    return topSailors, sailorSum, numTops, len(top)
 
 
 def calculateTopSailors(filtered_people, outlinks_dict, isTeamRace, isWomens, config: Config):
     prefix = 't' if isTeamRace else ''
     if isWomens:
         prefix = 'w' + prefix
-    topSkippers, topSkippersSum, nSkippers = getOrderedSailors(filtered_people, prefix + 'sr', 'skipper', outlinks_dict, config)
-    topCrews, topCrewsSum, nCrews = getOrderedSailors(filtered_people, prefix + 'cr', 'crew', outlinks_dict, config)
+    topSkippers, topSkippersSum, nSkippers, realSkippers = getOrderedSailors(
+        filtered_people, prefix + 'sr', 'skipper', outlinks_dict, config)
+    topCrews, topCrewsSum, nCrews, realCrews = getOrderedSailors(
+        filtered_people, prefix + 'cr', 'crew', outlinks_dict, config)
+
+    # A team with no rated sailors at all is UNRATED, not average. Filling every slot
+    # at the population mean published exactly 1400 for 86 of 161 teams in team racing
+    # - schools that simply do not team-race - which reads as a real mid-table rating.
+    # Partial rosters still fill, which is the measured behaviour: see getOrderedSailors.
+    if realSkippers + realCrews == 0:
+        return 0, topSkippers, topCrews
 
     found = nSkippers + nCrews
     topRating = (topSkippersSum + topCrewsSum) / found if found else 0
