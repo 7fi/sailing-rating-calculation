@@ -49,6 +49,15 @@ import whrClassify
 
 EXCUSED = ["DNS", "BKD", "RDG", "BYE"]
 
+# Separator inside a node label, "<sailorID>SEP<time bucket>". Must be a character that
+# survives pandas string concatenation: "\x00" does NOT - pandas silently drops it, which
+# left every fleet node label as a bare concatenation ("A A-Hamilton" + "s14" ->
+# "A A-Hamiltons14"). Nothing was mis-rated (checked: zero collisions between distinct
+# (sailor, bucket) pairs at both season and regatta resolution), but warmStart's split
+# then returned the whole label, so its "fall back to this sailor's latest theta" path
+# never fired and new nodes always cold-started at 0.
+NODE_SEP = "\x1f"
+
 # Season strings sort as s10, f10, s11, ... - two per year.
 def seasonIndex(season):
     """Map a season label like 's26' / 'f25' to a monotonic float index."""
@@ -68,7 +77,7 @@ class WHRData:
     priorB: np.ndarray      # int32
     priorDt: np.ndarray     # float64
     firstNode: np.ndarray   # int32, each sailor's earliest node
-    nodeLabel: np.ndarray   # str, "<sailorID>\x00<time bucket>" - stable across rebuilds
+    nodeLabel: np.ndarray   # str, "<sailorID>" + NODE_SEP + "<time bucket>"
     rows: pd.DataFrame      # per-row metadata, aligned to rowNode
     rowNode: np.ndarray     # int32
     rowField: np.ndarray    # int32
@@ -154,7 +163,7 @@ def buildWHRData(rootDir="", frFile="racesfr.parquet",
     else:
         raise ValueError(f"unknown timeResolution {timeResolution!r}")
 
-    nodeKey = df["sailorID"].astype(str) + "\x00" + bucket
+    nodeKey = df["sailorID"].astype(str) + NODE_SEP + bucket
     nodeLabels, rowNode = np.unique(nodeKey.to_numpy(), return_inverse=True)
     nNodes = len(nodeLabels)
 
@@ -197,10 +206,10 @@ def buildWHRData(rootDir="", frFile="racesfr.parquet",
     regattaOf = df.groupby("field")["Regatta"].first().reindex(fields).to_numpy()
     crossOf = df.groupby("field")["region"].nunique().reindex(fields).to_numpy() > 1
 
-    rows = df[["field", "raceID", "sailorID", "region", "Score", "season", "Position",
-               "ratingType", "Regatta", "raceNum"]].rename(
+    rows = df[["field", "raceID", "sailorID", "region", "Team", "Score", "season",
+               "Position", "ratingType", "Regatta", "raceNum"]].rename(
         columns={"Score": "score", "Position": "position", "Regatta": "regatta",
-                 "raceNum": "raceNumber"})
+                 "raceNum": "raceNumber", "Team": "team"})
 
     return WHRData(buckets, nNodes, nodeSailor.astype(np.int32), seasonOf,
                    priorA, priorB, priorDt, firstNode, nodeLabels, rows,
@@ -486,6 +495,21 @@ def anchorScale(theta, nodes, targetMean=1400.0, targetSd=400.0):
     return scale, targetMean - scale * float(np.mean(sub))
 
 
+def currentNodesBySailor(data: WHRData, rowMask):
+    """One node per sailor - their latest - among the rows selected by ``rowMask``.
+
+    Used as the anchor population so every fit of the same rating type is scaled on the
+    same footing: one observation per sailor, regardless of how many regattas they
+    sailed. See the note in ``fitFleetRatingType``.
+    """
+    nodes = np.unique(data.rowNode[rowMask])
+    order = np.lexsort((data.nodeSeason[nodes], data.nodeSailor[nodes]))
+    nodes = nodes[order]
+    sailors = data.nodeSailor[nodes]
+    isLast = np.concatenate([sailors[1:] != sailors[:-1], [True]])
+    return nodes[isLast]
+
+
 @dataclass
 class FleetFit:
     ratingType: str
@@ -512,9 +536,15 @@ def fitFleetRatingType(rootDir="", ratingType="sr", w=0.055, sigma0=3.0,
     theta, _ = fitWHR(data, w=w, sigma0=sigma0, maxiter=maxiter, verbose=verbose)
     credit = rowCredit(theta, data, w, sigma0)
 
-    # Anchor on the sailors who are actually ranked, i.e. the target seasons.
+    # Anchor on ONE NODE PER SAILOR - their most recent - so this fit's scale matches
+    # fitWithSE's, which anchors a frame holding one row per sailor. Anchoring on every
+    # (sailor, regatta) node instead weights each sailor by how many regattas they
+    # sailed, and heavy racers are stronger (4+ regattas mean 1510 vs 1221 for
+    # one-regatta sailors). Both populations are forced to mean `targetMean`, so that
+    # composition difference became a pure offset between the two fits: the published
+    # leaderboard rating sat 79.1 points above the end of the sailor's own curve.
     cur = np.isin(data.rows["season"].to_numpy(), list(targetSeasons))
-    anchorNodes = np.unique(data.rowNode[cur]) if cur.any() else np.arange(data.nNodes)
+    anchorNodes = currentNodesBySailor(data, cur) if cur.any() else np.arange(data.nNodes)
     scale, offset = anchorScale(theta, anchorNodes, targetMean, targetSd)
 
     return FleetFit(ratingType, data, theta, credit * scale,
@@ -542,7 +572,7 @@ def fitAllFleet(rootDir="", w=0.055, sigma0=3.0, timeResolution="regatta",
 def fitWithSE(rootDir="", ratingType="sr", w=0.6, sigma0=3.0,
               targetSeasons=("s26", "f26"), maxiter=1500, verbose=True,
               targetMean=1400.0, targetSd=400.0, postDf=None,
-              regattaNoiseFraction=0.17):
+              regattaNoiseFraction=0.17, hierarchical=True):
     """Season-resolution fit plus posterior SEs for the currently-ranked sailors.
 
     SEs are computed here rather than at regatta resolution because the quantity is
@@ -567,8 +597,8 @@ def fitWithSE(rootDir="", ratingType="sr", w=0.6, sigma0=3.0,
     cur = cur.assign(_t=cur["season"].map(seasonIndex))
     info = (cur.groupby("node")
                .agg(sailorID=("sailorID", "first"), region=("region", "first"),
-                    season=("season", "first"), races=("score", "size"),
-                    regattas=("regatta", "nunique"),
+                    team=("team", "last"), season=("season", "first"),
+                    races=("score", "size"), regattas=("regatta", "nunique"),
                     _t=("_t", "first"))
                .reset_index()            # keep `node` as a column, not the index
                .sort_values("_t")
@@ -623,8 +653,60 @@ def fitWithSE(rootDir="", ratingType="sr", w=0.6, sigma0=3.0,
     tau2 = max(float(info["rating"].var()) - float((info["se"] ** 2).mean()), 1e-6)
     info["shrunk"] = m + (info["rating"] - m) * tau2 / (tau2 + info["se"] ** 2)
     info["popmean"] = m
+
+    if hierarchical:
+        info["shrunk"] = _hierarchicalShrink(info, m)
     info["lcb"] = info["rating"] - 1.96 * info["se"]
     return info
+
+
+def _hierarchicalShrink(info, m):
+    """Two-level empirical-Bayes shrinkage: sailor -> team -> global.
+
+    Shrinking every sailor independently toward the GLOBAL mean systematically favours a
+    roster that concentrates its sailing in a few heavy racers over one that spreads it
+    across many, because each thin record is dragged to average in isolation. Nesting the
+    shrinkage inside the school fixes that: six sailors with one regatta each pool into
+    one reasonably-determined team level, which is then itself shrunk toward global by
+    how much the school has actually proved.
+
+        se_t^2   = 1 / sum_i (1/se_i^2)                    precision of the team's evidence
+        m_t      = sum_i rating_i/se_i^2 * se_t^2          precision-weighted team mean
+        tau2_T   = var(m_t) - mean(se_t^2)                 between-team variance
+        m_t'     = m + (m_t - m) * tau2_T/(tau2_T + se_t^2)
+        tau2_S   = var(rating_i - m_t) - mean(se_i^2)      within-team variance
+        shrunk_i = m_t' + (rating_i - m_t') * tau2_S/(tau2_S + se_i^2)
+
+    Every quantity is a method-of-moments estimate; there is no free constant. Measured
+    against the single-level version this moves Michigan 26 -> 33 and Boston University
+    33 -> 31 with no change to the regional mix of the top 30, where a per-regatta
+    penalty large enough to shift Michigan put USC at #1.
+
+    Preferred over ranking on `rating - 1.96*se`: that penalises a team in proportion to
+    how little it has raced, so it favoured whoever had the most data (USC has the
+    smallest team SE on the board), and it rises as a sailor races more at constant
+    skill - the same participation reward that made openskill's mu - 3*sigma unusable.
+    """
+    se = info["se"].to_numpy(float)
+    rating = info["rating"].to_numpy(float)
+    team = info["team"].astype("string").fillna("~none~").to_numpy()
+
+    prec = 1.0 / np.maximum(se ** 2, 1e-9)
+    byTeam = pd.DataFrame({"team": team, "prec": prec, "rp": rating * prec})
+    agg = byTeam.groupby("team").agg(sump=("prec", "sum"), sumrp=("rp", "sum"))
+    if len(agg) < 3:
+        return info["shrunk"]
+
+    agg["seT"] = np.sqrt(1.0 / agg["sump"])
+    agg["mT"] = agg["sumrp"] / agg["sump"]
+
+    tau2T = max(float(agg["mT"].var()) - float((agg["seT"] ** 2).mean()), 1e-6)
+    agg["mTshr"] = m + (agg["mT"] - m) * tau2T / (tau2T + agg["seT"] ** 2)
+
+    mT = agg["mT"].reindex(team).to_numpy()
+    mTshr = agg["mTshr"].reindex(team).to_numpy()
+    tau2S = max(float(np.var(rating - mT)) - float(np.mean(se ** 2)), 1e-6)
+    return mTshr + (rating - mTshr) * tau2S / (tau2S + se ** 2)
 
 
 def runFleetPipeline(rootDir="", outDir=None, ratingTypes=FLEET_RATING_TYPES,
@@ -632,7 +714,7 @@ def runFleetPipeline(rootDir="", outDir=None, ratingTypes=FLEET_RATING_TYPES,
                      targetSeasons=("s26", "f26"), verbose=True,
                      anchors=None, targetMean=1400.0, targetSd=400.0, postDf=None,
                      includeTR=True, trSeasons=("s26",), wTR=0.03, sigma0TR=1.0,
-                     regattaNoiseFraction=0.17):
+                     regattaNoiseFraction=0.17, hierarchical=True):
     """Produce everything the site needs, for every fleet rating type.
 
     Two fits per rating type, because they answer different questions:
@@ -661,6 +743,7 @@ def runFleetPipeline(rootDir="", outDir=None, ratingTypes=FLEET_RATING_TYPES,
 
         tm, ts = (anchors or {}).get(rt, (targetMean, targetSd))
         sailorFrames.append(fitWithSE(rootDir=rootDir, ratingType=rt, w=wLevel,
+                                      hierarchical=hierarchical,
                                       sigma0=sigma0, targetSeasons=targetSeasons,
                                       verbose=verbose, targetMean=tm, targetSd=ts,
                                       postDf=postDf,
@@ -713,48 +796,100 @@ if __name__ == "__main__":
 
 
 def raceLadder(fit: FleetFit):
-    """Turn the fitted curve plus per-race credit into a per-race rating ladder.
+    """Turn the fitted curve plus per-race credit into a continuous per-race ladder.
 
     The site publishes a per-race rating change, which a joint fit does not natively
-    produce - it fits a curve, not a sequence of updates. This walks each sailor
-    through each regatta so that
+    produce - it fits a curve over regattas, not a sequence of updates. Two columns
+    come out of this, and they mean different things:
 
-        newRating - oldRating == credit
+    * ``influence`` - the pure influence function from ``rowCredit``: how far this
+      sailor's fitted rating would move if this one race were dropped from the fit.
+      Entirely a property of the model, and the honest answer to "what did this race
+      do for me".
+    * ``credit`` - what the displayed ladder actually steps by, so that
+      ``newRating - oldRating == credit`` holds for every race and each regatta
+      begins exactly where the previous one ended.
 
-    for every race, and the walk lands exactly on the regatta's fitted rating. The
-    existing FleetScores columns therefore keep their meaning and the front end needs
-    no change; `credit` is stored alongside at full precision, because oldRating and
-    newRating are INT and rounding would flatten small credits.
+    They are not the same, and the difference is not small. Measured over 62,860
+    consecutive-regatta pairs at ``sr``: the real move between adjacent regatta nodes
+    has sd 61.5 points while the influences inside a regatta sum to sd 17.6, with
+    correlation 0.585 and mean absolute disagreement 29.2 points. The gap is real
+    movement that no single race can be credited with - it comes from the Wiener prior
+    pulling this node toward the sailor's neighbouring regattas, and from every other
+    result in the system shifting the field around them. The previous version of this
+    function ignored that and started each regatta at ``nodeRating - sum(influence)``,
+    which silently teleported the line by those 29 points at every regatta boundary.
+
+    So the remainder is spread evenly across the regatta's races:
+
+        step      = nodeRating - previous nodeRating      (real, from the fit)
+        credit_i  = influence_i + (step - sum(influence)) / nRaces
+
+    The total is then exact and the line is continuous, while ``influence`` is kept
+    unmodified for anyone who wants the strictly race-attributable part. A sailor's
+    first regatta has no previous node, so it keeps the old convention of opening at
+    ``nodeRating - sum(influence)``.
+
+    Both are stored at full precision, because oldRating and newRating are INT and
+    rounding would flatten small steps.
     """
     d = fit.data.rows[["raceID", "sailorID", "season", "regatta", "field",
                        "raceNumber", "position", "score"]].copy()
-    d["credit"] = fit.credit
+    d["influence"] = fit.credit
     d["nodeRating"] = fit.rating          # constant within a (sailor, regatta) node
     # Raw theta (log-odds) as well: pairwise probabilities are sigmoid(theta_i-theta_j),
     # and with openskill off the oldMu column would otherwise sit at the prior and the
     # evaluation harness would silently measure nothing.
     d["theta"] = fit.theta[fit.data.rowNode]
     d["raceNumber"] = pd.to_numeric(d["raceNumber"], errors="coerce")
-    d = d.sort_values(["sailorID", "regatta", "raceNumber", "raceID"], kind="stable")
+    # Order by the node's own time value, not by the regatta NAME: regatta strings start
+    # with the season code, so sorting on them alphabetically interleaves seasons
+    # ("f25" < "s14") and the previous node would be the wrong regatta.
+    d["_t"] = fit.data.nodeSeason[fit.data.rowNode]
+    d = d.sort_values(["sailorID", "_t", "raceNumber", "raceID"],
+                      kind="stable").reset_index(drop=True)
 
-    g = d.groupby(["sailorID", "regatta"], sort=False)["credit"]
+    # Everything below stays on this one contiguous index on purpose: grouped
+    # transforms carry the frame's index, so reindexing or merging midway silently
+    # misaligns them against the frame.
+    key = [d["sailorID"].to_numpy(), d["regatta"].to_numpy()]
+    g = d.groupby(key, sort=False)["influence"]
     total = g.transform("sum")
-    creditBefore = g.cumsum() - d["credit"]
-    d["oldRating"] = d["nodeRating"] - total + creditBefore
+    nRaces = g.transform("size")
+
+    # The previous regatta node's fitted rating, per sailor, in time order. Rows of a
+    # node are contiguous after the sort, so the first row of each node carries it.
+    firstOfNode = ~d.duplicated(subset=["sailorID", "regatta"], keep="first")
+    seq = d.loc[firstOfNode, ["sailorID", "regatta", "nodeRating"]]
+    prevByNode = pd.Series(
+        seq.groupby("sailorID", sort=False)["nodeRating"].shift().to_numpy(),
+        index=pd.MultiIndex.from_arrays([seq["sailorID"], seq["regatta"]]))
+    prev = pd.Series(
+        prevByNode.reindex(pd.MultiIndex.from_arrays(key)).to_numpy(), index=d.index)
+
+    # Real movement into this regatta; a career's first regatta has no previous node,
+    # so it opens at nodeRating - sum(influence) as before.
+    step = (d["nodeRating"] - prev).fillna(total)
+    d["credit"] = d["influence"] + (step - total) / nRaces
+
+    g2 = d.groupby(key, sort=False)["credit"]
+    creditBefore = g2.cumsum() - d["credit"]
+    d["oldRating"] = d["nodeRating"] - g2.transform("sum") + creditBefore
     d["newRating"] = d["oldRating"] + d["credit"]
 
     # Predicted finishing place from the fitted strengths, so `predicted` stays
     # consistent with the ratings actually being published.
     d["predicted"] = (d.groupby("field")["nodeRating"]
                        .rank(ascending=False, method="first").astype(int))
-    return d
+    return d.drop(columns=["_t"])
 
 
 def warmStart(newData: WHRData, oldData: WHRData, oldTheta):
     """Carry a previous fit's theta onto a rebuilt (larger) node set.
 
     Node ids are positional and shift whenever races are added, so the mapping goes
-    through the stable "<sailorID>\\x00<bucket>" labels. Nodes that did not exist in
+    through the stable "<sailorID>" + NODE_SEP + "<bucket>" labels. Nodes that did not
+    exist in
     the old fit start at that sailor's most recent known value, falling back to 0.
 
     This is what makes an incremental refresh cheap: adding one regatta barely moves
@@ -766,11 +901,11 @@ def warmStart(newData: WHRData, oldData: WHRData, oldTheta):
     # fall back to the sailor's latest previous value for brand-new nodes
     latest = {}
     for lbl, t in zip(oldData.nodeLabel, oldTheta):
-        latest[lbl.split("\x00", 1)[0]] = t
+        latest[lbl.split(NODE_SEP, 1)[0]] = t
     hit = 0
     for i, lbl in enumerate(newData.nodeLabel):
         if lbl in prev:
             theta[i] = prev[lbl]; hit += 1
         else:
-            theta[i] = latest.get(lbl.split("\x00", 1)[0], 0.0)
+            theta[i] = latest.get(lbl.split(NODE_SEP, 1)[0], 0.0)
     return theta, hit

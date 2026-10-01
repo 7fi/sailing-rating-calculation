@@ -96,6 +96,13 @@ class Config:
     # which barely touches a sailor with many regattas and substantially widens a
     # sailor with one.
     whrRegattaNoiseFraction : float = 0.0
+    # Two-level empirical-Bayes shrinkage: sailor -> team -> global, instead of every
+    # sailor toward the global mean independently. See whr._hierarchicalShrink. Nesting
+    # inside the school stops a concentrated roster beating a deep one purely because
+    # each of the deep roster's thin records was dragged to average in isolation.
+    # Measured: Michigan 26 -> 33, Boston University 33 -> 31, top-30 regional mix
+    # unchanged. Volume-neutral at team level, which every per-sailor rule was not.
+    hierarchicalShrinkage : bool = True
 
     # Minimum distinct regattas before a sailor appears on an official leaderboard.
     # Left OFF: it is a volume rule, and volume correlates with region. At 2 it cut

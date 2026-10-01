@@ -83,7 +83,7 @@ def buildTRData(rootDir="", trFile="racesTR.parquet", ratingType="tsr",
     # one node per (sailor, bucket), as in the fleet fit
     labels, nodeOf = [], {}
     def nodeFor(k, b):
-        lbl = f"{k}\x00{b}"
+        lbl = f"{k}{whr.NODE_SEP}{b}"
         idx = nodeOf.get(lbl)
         if idx is None:
             idx = nodeOf[lbl] = len(labels)
@@ -101,7 +101,7 @@ def buildTRData(rootDir="", trFile="racesTR.parquet", ratingType="tsr",
 
     nNodes = len(labels)
     nodeLabel = np.array(labels, dtype=object)
-    sailorOf = np.array([l.split("\x00", 1)[0] for l in labels])
+    sailorOf = np.array([l.split(whr.NODE_SEP, 1)[0] for l in labels])
     _, nodeSailor = np.unique(sailorOf, return_inverse=True)
     t = np.array([nodeTime.get(i, 0.0) for i in range(nNodes)], float)
 
@@ -122,6 +122,10 @@ def buildTRData(rootDir="", trFile="racesTR.parquet", ratingType="tsr",
             rows.append(pd.DataFrame({
                 "raceID": df["raceID"].to_numpy(), "regatta": df["Regatta"].to_numpy(),
                 "season": df["season"].to_numpy(), "side": sideName,
+                # Needed to order a sailor's regattas chronologically in trLadder;
+                # regatta strings begin with the season code, so sorting on the name
+                # interleaves seasons ("f25" < "s14").
+                "date": df["Date"].to_numpy(),
                 "sailorID": [k[j] for k in keys], "node": nodes[:, j],
                 "team": df[f"team{sideName}Name"].to_numpy(),
                 "outcome": df[f"team{sideName}Outcome"].to_numpy(),
@@ -219,12 +223,15 @@ def trLadder(data: TRData, theta, credit, rowNode, scale, offset):
     """Per-match rating ladder for team racing, mirroring whr.raceLadder.
 
     Walks each sailor through each regatta so that ``newRating - oldRating == credit``
-    for every match and the walk lands exactly on that regatta's fitted rating. Without
-    this the TR score rows carried whatever the (skipped) openskill pass left behind,
-    which was a constant 1000 for every sailor in every match.
+    for every match, each regatta opens where the previous one closed, and the walk
+    lands exactly on that regatta's fitted rating. Without this the TR score rows
+    carried whatever the (skipped) openskill pass left behind, which was a constant
+    1000 for every sailor in every match.
+
+    See ``whr.raceLadder`` for why ``influence`` and ``credit`` are separate columns.
     """
     d = data.rows.copy()
-    d["credit"] = credit * scale
+    d["influence"] = credit * scale
     d["nodeRating"] = theta[rowNode] * scale + offset
     # Raw theta as well: pairwise probabilities are sigmoid of theta differences, and
     # with openskill off the oldMu column would otherwise sit at the prior.
@@ -241,13 +248,34 @@ def trLadder(data: TRData, theta, credit, rowNode, scale, offset):
     d["predicted"] = np.where(ownSum > oppSum, 1.0, 0.0)
 
     # A match number is not in the flattened rows, so order within a regatta by raceID,
-    # which carries the sequence.
-    d = d.sort_values(["sailorID", "regatta", "raceID"], kind="stable")
+    # which carries the sequence; across regattas order by date, not by regatta name.
+    d = d.sort_values(["sailorID", "date", "raceID"],
+                      kind="stable").reset_index(drop=True)
 
-    g = d.groupby(["sailorID", "regatta"], sort=False)["credit"]
+    # Same decomposition as whr.raceLadder: `influence` is the per-match influence
+    # function, `credit` is what the displayed ladder steps by so the line is
+    # continuous and lands on each regatta's fitted rating. The remainder - real
+    # movement that comes from the prior and from the rest of the field rather than
+    # from any one match - is spread evenly over the regatta's matches.
+    key = [d["sailorID"].to_numpy(), d["regatta"].to_numpy()]
+    g = d.groupby(key, sort=False)["influence"]
     total = g.transform("sum")
-    creditBefore = g.cumsum() - d["credit"]
-    d["oldRating"] = d["nodeRating"] - total + creditBefore
+    nMatches = g.transform("size")
+
+    firstOfNode = ~d.duplicated(subset=["sailorID", "regatta"], keep="first")
+    seq = d.loc[firstOfNode, ["sailorID", "regatta", "nodeRating"]]
+    prevByNode = pd.Series(
+        seq.groupby("sailorID", sort=False)["nodeRating"].shift().to_numpy(),
+        index=pd.MultiIndex.from_arrays([seq["sailorID"], seq["regatta"]]))
+    prev = pd.Series(
+        prevByNode.reindex(pd.MultiIndex.from_arrays(key)).to_numpy(), index=d.index)
+
+    step = (d["nodeRating"] - prev).fillna(total)
+    d["credit"] = d["influence"] + (step - total) / nMatches
+
+    g2 = d.groupby(key, sort=False)["credit"]
+    creditBefore = g2.cumsum() - d["credit"]
+    d["oldRating"] = d["nodeRating"] - g2.transform("sum") + creditBefore
     d["newRating"] = d["oldRating"] + d["credit"]
     return d
 

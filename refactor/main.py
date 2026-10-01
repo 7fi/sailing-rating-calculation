@@ -352,7 +352,8 @@ def main(rootDir : str = "", jupyter = False):
                                  targetSd=config.whrTargetSd,
                                  trSeasons=tuple(config.targetTRSeasons),
                                  wTR=config.whrWTR, sigma0TR=config.whrSigma0TR,
-                                 regattaNoiseFraction=config.whrRegattaNoiseFraction)
+                                 regattaNoiseFraction=config.whrRegattaNoiseFraction,
+                                 hierarchical=config.hierarchicalShrinkage)
         people = loadWHRRatings(people, rootDir, config)
         df_frAfter = applyWHRToRaces(df_frAfter, rootDir, config, label="fleet")
         # Team racing needs this too. Without it the TR score rows kept whatever the
