@@ -24,7 +24,7 @@ class Config:
         'olivia-figley-2026': 'olivia-figley',
         'Winter vetrone-Northeastern': 'winter-vetrone',
         'pierce-olsen-2029' : "pierce-olsen",
-        'fynn-olsen-2029' : 'fynn-olsen',
+        # 'fynn-olsen-2029' : 'fynn-olsen',
         'marcus-abate-2020' : 'marcus-abate'
     }
     numTops : ClassVar[dict[str, int]] = {'fr': {'open': 3, 'womens': 2}, 'tr': {'open': 3, 'womens': 3}}
@@ -37,6 +37,6 @@ class Config:
     
     sailorInfoFile = 'sailor_data2.parquet'
     
-    doScrape : bool = False
+    doScrape : bool = True
     calcAll : bool = True
     doUpload : bool = True

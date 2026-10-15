@@ -11,47 +11,54 @@ import os
 from concurrent.futures import ProcessPoolExecutor
 from pageCache import readPage, writePage
 
-async def cleanup_semaphore(semaphore):
-    if semaphore.locked():
-        # Forcefully release if it was accidentally left locked
-        semaphore.release()
-        print("Semaphore was released manually.")
+def blankRow(link):
+    """A placeholder for a sailor whose page could not be read.
+
+    The sailor still needs a row, or the races they are in cannot be calculated. A blank
+    name marks it, and runSailorData refetches blank rows on the next run.
+    """
+    return [link, link, "", "", "", "", "", "", "", "", ""]
+
+def isRetryable(e):
+    """Timeouts, dropped connections, rate limiting and server errors are worth another try."""
+    if isinstance(e, (httpx.TimeoutException, httpx.ReadError, httpx.RemoteProtocolError)):
+        return True
+    return isinstance(e, httpx.HTTPStatusError) and (e.response.status_code == 429 or e.response.status_code >= 500)
 
 async def fetchData(client, semaphore, link):
     retries = 10
     backoff = 1
     broken_links = ['catherine-lindsay', 'francis-humphrey', 'gabriel-gabe-morreale', 'henriette-smith', 'iona-deacon', 'jason-case-pittsburgh', 'jewel-min-min-kelly', 'race-nicolia', 'showtime', 'gabriel-gabe-morreale-2028']
+    sailorPage = None
     if link not in broken_links and os.path.exists(f"sailorPages/{link}.html"):
         sailorPage = BeautifulSoup(readPage(f"sailorPages/{link}.html"), 'html.parser')
-    else:
+        # Error pages used to be cached too - a sailor linked from a regatta before their
+        # profile page exists gets a 404 - and reading one back stored a blank sailor for
+        # good. A cached page without the sailor data is refetched instead of trusted.
+        if sailorPage.find('meta', attrs={'name': 'ts:data'}) is None:
+            sailorPage = None
+
+    if sailorPage is None:
+        url = f"https://scores.collegesailing.org/sailors/{link}/"
         for attempt in range(retries):
             try:
                 async with semaphore:  # Limit concurrent requests
-                    url = f"https://scores.collegesailing.org/sailors/{link}/"
                     page = await client.get(url)
-                    writePage(f"sailorPages/{link}.html", page)
-                    sailorPage = BeautifulSoup(page.text, 'html.parser')
-                    page.raise_for_status()  # Raise HTTPError for bad responses (4xx, 5xx)
+                page.raise_for_status()  # Raise HTTPError for bad responses (4xx, 5xx)
+                # Only cache a page that was actually served, never an error page.
+                writePage(f"sailorPages/{link}.html", page)
+                sailorPage = BeautifulSoup(page.text, 'html.parser')
+                break
+            except (httpx.RequestError, httpx.HTTPStatusError) as e:
+                if not isRetryable(e) or attempt == retries - 1:
+                    print(f"{type(e).__name__} when fetching {url}: {e}. Skipping...")
+                    return blankRow(link)
+                print(f"{type(e).__name__} when fetching {url}. Retrying... ({attempt + 1}/{retries})")
+                await asyncio.sleep(backoff)  # Wait before retrying, outside the semaphore
+                backoff *= 2  # Exponential backoff
 
-            except httpx.ConnectTimeout as e:
-                print(f"Connection timeout when fetching {url}. Retrying... ({attempt + 1}/{retries})")
-                await asyncio.sleep(backoff)  # Wait before retrying
-                backoff *= 2  # Exponential backoff
-            except httpx.ReadError as e:
-                print(f"Read error when fetching {url}. Retrying... ({attempt + 1}/{retries})")
-                await asyncio.sleep(backoff)  # Wait before retrying
-                backoff *= 2  # Exponential backoff
-            except httpx.HTTPStatusError as e:
-                print(f"HTTP error {e.response.status_code} when fetching {url}. Skipping...")
-                await cleanup_semaphore(semaphore)
-                return None
-            except httpx.RequestError as e:
-                print(f"Request error {e}. Skipping...")
-                await cleanup_semaphore(semaphore)
-                return None
-        await cleanup_semaphore(semaphore)
-        
     sailorData = sailorPage.find('meta', attrs={'name': 'ts:data'})
+    school = ""
     try:
         school = sailorPage.find('ul',id='menu').contents[3].text
         # print(sailorPage.find('ul',id='menu').contents)
@@ -87,10 +94,10 @@ async def fetchData(client, semaphore, link):
             return [link, link, sailorData['name'], sailorData['first_name'], sailorData['last_name'],sailorData['gender'],sailorData['year'], sailorData['school'].split("/")[2][:-1], school, sailorData['id'], sailorData['external_id']]
         except:
             print("no sailor data forr", link)
-            return []
+            return blankRow(link)
     else:
         print("no sailor data for", link)
-        return [link, link, "", "", "", "", "", "", "", "", ""]
+        return blankRow(link)
 
 async def getBatch(client, links, semaphore):
     tasks = []
@@ -126,7 +133,15 @@ def runSailorData(frfile, trfile, oldDataFile, outfile):
         old = pd.read_parquet(oldDataFile)
     except FileNotFoundError:
         old = pd.DataFrame()
-    
+
+    if len(old) > 0:
+        # Blank rows are sailors whose page could not be read last time. Leaving them out
+        # of old means their links count as new below, so they are fetched again.
+        retry = old['link'].notna() & (old['name'] == '')
+        if retry.any():
+            print(f"Refetching {int(retry.sum())} sailors whose pages could not be read before")
+        old = old.loc[~retry]
+
     # %%
     df_races['Link'] = df_races['Link'].fillna('Unknown') # fill empty links
     links = df_races['Link'].dropna().unique()
@@ -183,7 +198,12 @@ def runSailorData(frfile, trfile, oldDataFile, outfile):
         df_people = pd.concat([df_people, df_no_link], ignore_index=True)
     
     df_people['id'] = pd.to_numeric(df_people['id'], errors='raise')
-    
+
+    # Sailors without a link are rebuilt from the races every run and old already holds
+    # them, so without this the file gained a full copy of them each time. setupPeople
+    # keeps the last row for a key, so keeping the last one here changes nothing there.
+    df_people = df_people.drop_duplicates(subset='key', keep='last').reset_index(drop=True)
+
     # %%
     print("outputting to parquet")
     df_people.to_parquet(outfile, index=False)

@@ -392,17 +392,53 @@ def setup(infile):
   return regattaSoups, df_old, regattas
         
 
-def scrapeTR(infile, outfile, outInfoFile):    
+def buildSailorInfo(df_races, totalSailors, infoFile):
+  """Every sailor in every stored team race, for runSailorData to look up.
+
+  This used to hold only the sailors from regattas scraped in the current run. A
+  regatta is only scraped once, so if the sailor lookup failed that run, or never ran,
+  its team-race-only sailors dropped out of the file and were never looked up again -
+  and the calculation silently leaves out racers it has no sailor for.
+
+  Boats do not record a year, so a sailor's entry from a scrape (this run's, or kept
+  from an earlier file) wins over the one rebuilt from the boats.
+  """
+  sailors = {}
+  for _, row in df_races.iterrows():
+    for side in ['A', 'B']:
+      boats = row[f'team{side}Boats']
+      if boats is None:
+        continue
+      for boat in boats:
+        for pos in ['skipper', 'crew']:
+          key = boat[pos + 'Key']
+          if key is None or pd.isna(key):
+            continue
+          sailors[key] = {'name': boat[pos + 'Name'], 'year': None, 'link': boat[pos + 'Link'], 'key': key, 'team': row[f'team{side}Name']}
+
+  try:
+    previous = pd.read_json(infoFile)
+    if 'key' in previous.columns:
+      for record in previous.to_dict('records'):
+        if record['key'] in sailors:
+          sailors[record['key']] = record
+  except (FileNotFoundError, ValueError):
+    pass
+
+  sailors.update({k: v for k, v in totalSailors.items() if k is not None and not pd.isna(k)})
+  return sailors
+
+def scrapeTR(infile, outfile, outInfoFile):
   print("Scraping TR")
   regattaSoups, df_old, regattas = setup(infile)
   data, totalSailors = getData(regattaSoups, regattas)
-  
+
   df_cur = pd.DataFrame(data)
   df_combined = pd.concat([df_old, df_cur])
 
   df_final = df_combined.drop_duplicates(subset='raceID', keep='last').reset_index(drop=True)
 
-  df_totalSailors2 = pd.DataFrame.from_dict(totalSailors,orient='index')
+  df_totalSailors2 = pd.DataFrame.from_dict(buildSailorInfo(df_final, totalSailors, outInfoFile), orient='index')
   df_totalSailors2 = df_totalSailors2.reset_index(drop=True)
   df_totalSailors2.to_json(outInfoFile, index=False)
 

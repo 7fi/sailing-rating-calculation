@@ -58,7 +58,10 @@ async def conditional_get(client, link, page_url_ending, full_meta={}, page_type
         
     url = f"https://scores.collegesailing.org/{link}/{page_url_ending}{"/" if page_url_ending != '' else ''}"
     html_path = f"pages/{link}-{page_type}.html"
-    meta = full_meta[page_type]
+    # Work on a copy. The original lives in scrape_state, and recording a new etag there
+    # before the regatta is processed would mean a failed run leaves the state saying
+    # the page was handled - the next run gets a 304 and never processes the update.
+    meta = dict(full_meta.get(page_type, {}))
 
     headers = {}
     if "etag" in meta:
@@ -89,67 +92,58 @@ async def conditional_get(client, link, page_url_ending, full_meta={}, page_type
 
     return html, meta, True
 
-async def cleanup_semaphore(semaphore):
-    if semaphore.locked():
-        # Forcefully release if it was accidentally left locked
-        semaphore.release()
-        print("Semaphore was released manually.")
+def isRetryable(e):
+    """Timeouts, dropped connections, rate limiting and server errors are worth another try."""
+    if isinstance(e, (httpx.TimeoutException, httpx.ReadError, httpx.RemoteProtocolError)):
+        return True
+    return isinstance(e, httpx.HTTPStatusError) and (e.response.status_code == 429 or e.response.status_code >= 500)
 
-async def fetchData(client, semaphore, regattaID, link, scoring, date, meta, missing):
+async def getPageWithRetries(client, semaphore, link, page_url_ending, meta, page_type=''):
+    """Fetch one page, retrying it on its own.
+
+    Each page retries separately so that a retry of the second page cannot re-request
+    the first. Re-requesting it would get a 304 against the etag the first attempt just
+    picked up, and the fact that it had changed would be forgotten.
+    """
     retries = 10
     backoff = 1
-    if not os.path.exists(f"pages/{link.split("/")[0]}"):
-        os.makedirs(f"pages/{link.split("/")[0]}")
     for attempt in range(retries):
         try:
             async with semaphore:  # Limit concurrent requests
-                if scoring == "Team":
-                    # All races
-                    html, newMeta, achanged = await conditional_get(client, link, "all", meta)
-                    fullScores = BeautifulSoup(html, 'html.parser')
-
-                    # sailors
-                    html, newSMeta, schanged = await conditional_get(client, link, "sailors", meta)
-                    sailors = BeautifulSoup(html, 'html.parser')
-                    
-                    # report
-                    html, newRMeta, rchanged = await conditional_get(client, link, "", meta, "report")
-                    report = BeautifulSoup(html, 'html.parser')
-                    
-                    full_meta = {"all": newMeta, "sailors": newSMeta, 'report': newRMeta}
-                    process = achanged or schanged or rchanged or missing
-                    
-                    await cleanup_semaphore(semaphore)
-                    return {'regattaID': regattaID, 'allRaces': fullScores, "sailors": sailors, 'report': report, 'scoring':scoring, 'date': date, 'meta': full_meta, 'process': process}
-                else:
-                    # full scores
-                    html, newMeta, changed = await conditional_get(client, link, "full-scores", meta)
-                    fullScores = BeautifulSoup(html, 'html.parser')
-
-                    # sailors
-                    html, newSMeta, schanged = await conditional_get(client, link, "sailors", meta)
-                    sailors = BeautifulSoup(html, 'html.parser')
-                    
-                    full_meta = {"full-scores": newMeta, "sailors": newSMeta}
-                    
-                    await cleanup_semaphore(semaphore)
-                    return {'regattaID': regattaID, 'fullScores': fullScores, "sailors": sailors, 'scoring':scoring, 'date': date, 'meta': full_meta, 'process': changed or schanged or missing}
-        except httpx.ConnectTimeout as e:
-            print(f"Connection timeout when fetching {link}. Retrying... ({attempt + 1}/{retries})")
-            await asyncio.sleep(backoff)  # Wait before retrying
+                return await conditional_get(client, link, page_url_ending, meta, page_type)
+        except (httpx.RequestError, httpx.HTTPStatusError) as e:
+            if not isRetryable(e) or attempt == retries - 1:
+                print(f"{type(e).__name__} when fetching {link}/{page_url_ending}: {e}. Skipping...")
+                return None
+            print(f"{type(e).__name__} when fetching {link}/{page_url_ending}. Retrying... ({attempt + 1}/{retries})")
+            await asyncio.sleep(backoff)  # Wait before retrying, outside the semaphore
             backoff *= 2  # Exponential backoff
-        except httpx.ReadError as e:
-            print(f"Read error when fetching {link}. Retrying... ({attempt + 1}/{retries})")
-            await asyncio.sleep(backoff)  # Wait before retrying
-            backoff *= 2  # Exponential backoff
-        except httpx.HTTPStatusError as e:
-            print(f"HTTP error {e.response.status_code} when fetching {link}. Skipping...")
-            await cleanup_semaphore(semaphore)
+
+async def fetchData(client, semaphore, regattaID, link, scoring, date, meta, missing):
+    if not os.path.exists(f"pages/{link.split("/")[0]}"):
+        os.makedirs(f"pages/{link.split("/")[0]}")
+
+    if scoring == "Team":
+        pages = [("all", "all"), ("sailors", "sailors"), ("", "report")]
+    else:
+        pages = [("full-scores", "full-scores"), ("sailors", "sailors")]
+
+    soups = {}
+    full_meta = {}
+    process = missing
+    for page_url_ending, page_type in pages:
+        result = await getPageWithRetries(client, semaphore, link, page_url_ending, meta, page_type)
+        if result is None:
+            # Nothing from this regatta is recorded in scrape_state, so the next run tries it again.
             return None
-        except httpx.RequestError as e:
-            print(f"Request error {e}. Skipping...")
-            await cleanup_semaphore(semaphore)
-            return None
+        html, newMeta, changed = result
+        soups[page_type] = BeautifulSoup(html, 'html.parser')
+        full_meta[page_type] = newMeta
+        process = process or changed
+
+    if scoring == "Team":
+        return {'regattaID': regattaID, 'allRaces': soups['all'], "sailors": soups['sailors'], 'report': soups['report'], 'scoring':scoring, 'date': date, 'meta': full_meta, 'process': process}
+    return {'regattaID': regattaID, 'fullScores': soups['full-scores'], "sailors": soups['sailors'], 'scoring':scoring, 'date': date, 'meta': full_meta, 'process': process}
 
 def parseScore(scoreString):
     if scoreString.text.isdigit():
@@ -509,6 +503,12 @@ async def getBatch(client, regattaKeys, regattaValues, semaphore, executor):
     tasks = [process_in_process(executor, regatta) for regatta in results if regatta is not None and regatta['process']]
     print(f"{len(results)} regattas were checked and {len(tasks)} changed or need to be processed")
     rows = await asyncio.gather(*tasks)
+
+    # Only now record the new etags, for regattas that were fetched in full and processed.
+    # regatta['meta'] is that regatta's entry in scrape_state.
+    for regatta, result in zip(regattaValues, results):
+        if result is not None:
+            regatta['meta'].update(result['meta'])
     return rows
 
 async def main(regattas):

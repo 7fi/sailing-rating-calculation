@@ -142,6 +142,8 @@ def uploadTeams(people: dict[str, Sailor], outlinks_dict, racecounts_dict, winp_
         topWomenRating, topWomenSkippers, topWomenCrews = calculateTopSailors(currentSailors, outlinks_dict, False, True, config)
         topRatingTR, topSkippersTR, topCrewsTR = calculateTopSailors(currentSailors, outlinks_dict, True, False, config)
         topWomenRatingTR, topWomenSkippersTR, topWomenCrewsTR = calculateTopSailors(currentSailors, outlinks_dict, True, True, config)
+        if team == "MIT":
+            print(topRating, topCrews)
         
         avg = calculateAvgRating(currentSailors, config)
         avgRatio = calculateAvgRatio(currentSailors, winp_dict)

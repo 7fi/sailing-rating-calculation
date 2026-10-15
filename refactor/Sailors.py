@@ -246,13 +246,23 @@ def createSailor(sd):
 def setupPeople(df_sailor_ratings, df_sailor_info, config: Config):
     if config.calcAll:
         rows = list(df_sailor_info.itertuples(index=False, name=None))
-        results = map(partial(make_sailor, config), rows)
-        return dict(results)
+        totalCount = len(rows)
+
+        people = {}
+        for i, row in enumerate(rows):
+            if i % 1000 == 0:
+                print(f"Created sailor #{i}/{totalCount}")
+            key, sailor = make_sailor(config, row)
+            people[key] = sailor
+        return people
     
     else:
         people = {}
-        
-        for _, row in df_sailor_ratings.iterrows():
+        totalCount = len(df_sailor_ratings)
+
+        for i, (_, row) in enumerate(df_sailor_ratings.iterrows()):
+            if i % 1000 == 0:
+                print(f"Created sailor #{i}/{totalCount}")
             people[row.key] = createSailor(row.to_dict())
 
         pplkeys = people.keys()
