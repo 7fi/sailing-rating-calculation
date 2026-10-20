@@ -323,11 +323,8 @@ def processFleetRegatta(regattaID, fullScores, sailors, scoring, raceDate):
     header = fullScores.find('table', class_="results").find_all('th', class_="right")
     raceCount = int(header[len(header) - 2].text)
         
-    numDivisions = 1
-    if scoreData[1]['class'][0] == 'divB' and scoreData[2]['class'][0] == 'totalrow':
-        numDivisions = 2
-    if scoreData[2]['class'][0] == 'divC':
-        numDivisions = 3
+    # each team has one row per division followed by a totalrow
+    numDivisions = next(k for k, row in enumerate(scoreData) if row['class'][0] == 'totalrow')
 
     teamCount = int(len(scoreData) / (numDivisions + 1))
     
@@ -345,11 +342,8 @@ def processFleetRegatta(regattaID, fullScores, sailors, scoring, raceDate):
         teamLink = scoreData[(i*(numDivisions + 1)) - (numDivisions + 1)].find('a')['href'].split("/")[2]
         teamScores = {'A': [], 'B': [], 'C':[]}
 
-        teamScores["A"] = [parseScore(scoreData[(i*(numDivisions + 1)) - (numDivisions + 1)].contents[j]) for j in range(4, (4 + raceCount))]
-        if numDivisions > 1:
-            teamScores["B"] = [parseScore(scoreData[(i*(numDivisions + 1)) - (numDivisions + 1) + 1].contents[j]) for j in range(4, (4 + raceCount))]
-        if numDivisions > 2:
-            teamScores["C"] = [parseScore(scoreData[(i*(numDivisions + 1)) - (numDivisions + 1) + 2].contents[j]) for j in range(4, (4 + raceCount))]
+        for d in range(numDivisions):
+            teamScores[chr(ord('A') + d)] =[parseScore(scoreData[(i*(numDivisions + 1)) - (numDivisions + 1) + d].contents[j]) for j in range(4, (4 + raceCount))]
             
         if None in teamScores['A'] or None in teamScores['B'] or None in teamScores['C']:
             print(teamScores)
