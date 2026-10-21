@@ -66,8 +66,6 @@ def updateRaces(newRaces, venue, actualIDs, penalties, racers : list[Sailor], sc
 
         ratingType = ('w' if womens else '') + ('s' if pos.lower() == 'skipper' else 'c') + 'r'
         
-        sailor.outLinks += outLinks
-        
         newRaces.append({
             'raceID': actualID,
             'season': actualID.split("/")[0],

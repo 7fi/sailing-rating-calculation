@@ -11,8 +11,9 @@ def getOrderedSailors(people : list[Sailor], ratingType, pos, outlinks_dict, con
     isTR = 't' in ratingType
     outlinks_keys = outlinks_dict.keys()
     eligible_people = [p for p in people
-                        if p.isRankEligible(config.targetSeasons, pos, config.gradCutoff, outLinks= outlinks_dict[p.key] 
-                        if p.key in outlinks_keys else None, needsOutlinks= not isTR)
+                        if p.isRankEligible(config.targetSeasons, pos, config.gradCutoff,
+                                             outLinks= outlinks_dict[p.key] if p.key in outlinks_keys else None, 
+                                             needsOutlinks= not isTR)
                         and getattr(p, ratingType).mu != config.model.mu]
     orderedSailors = sorted(eligible_people,
                             key=lambda x: getattr(x, ratingType).ordinal(
@@ -133,7 +134,7 @@ def calculateAvgRating(people : list[Sailor], config:Config):
     
 def uploadTeams(people: dict[str, Sailor], outlinks_dict, racecounts_dict, winp_dict, team_link_map, connection, config: Config):
     for team, region in teamRegions.items():
-        # if team != 'Northeastern':
+        # if team != 'MIT':
         #     continue
         sailors : list[Sailor] = [p for key, p in people.items() if team in p.teams]
         currentSailors : list[Sailor] = [p for p in sailors if p.isOnTeamInSeasons(team, config.targetSeasons)]
@@ -142,8 +143,6 @@ def uploadTeams(people: dict[str, Sailor], outlinks_dict, racecounts_dict, winp_
         topWomenRating, topWomenSkippers, topWomenCrews = calculateTopSailors(currentSailors, outlinks_dict, False, True, config)
         topRatingTR, topSkippersTR, topCrewsTR = calculateTopSailors(currentSailors, outlinks_dict, True, False, config)
         topWomenRatingTR, topWomenSkippersTR, topWomenCrewsTR = calculateTopSailors(currentSailors, outlinks_dict, True, True, config)
-        if team == "MIT":
-            print(topRating, topCrews)
         
         avg = calculateAvgRating(currentSailors, config)
         avgRatio = calculateAvgRatio(currentSailors, winp_dict)

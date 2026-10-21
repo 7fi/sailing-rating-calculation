@@ -111,7 +111,7 @@ class Sailor:
             outLinks = self.outLinks
         
         return (self.hasTargetSeasons(targetSeasons, pos) # has target seasons
-                        and (outLinks > 150 if needsOutlinks else True) # and has x outlinks   
+                        and (outLinks > 120 if needsOutlinks else True) # and has x outlinks   
                         and betterYear > gradCutoff) # and graduates after the cutoff
         
     def resetRanks(self):
