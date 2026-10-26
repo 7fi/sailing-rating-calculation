@@ -477,8 +477,12 @@ def uploadSailors(people, connection, config : Config, batch_size=300):
                                 raceCount = VALUES(raceCount)
                         """
 
+    # pandas gives missing values as float NaN, which the connector writes as a bare `nan`
+    def nanToNone(v):
+        return None if isinstance(v, float) and np.isnan(v) else v
+
     for i, p in enumerate(eligible):
-        if p.key is None or p.name is None or p.name == "":
+        if p.key is None or nanToNone(p.name) is None or p.name == "":
             print("No key for", p.name)
             continue
 
@@ -488,7 +492,7 @@ def uploadSailors(people, connection, config : Config, batch_size=300):
         sailor_rows.append((
             p.key.replace("/", "-"),
             p.name,
-            p.gender,
+            nanToNone(p.gender),
             int(p.sr.ordinal(target=config.targetElo, alpha=200 / config.model.sigma)),
             int(p.cr.ordinal(target=config.targetElo, alpha=200 / config.model.sigma)),
             int(p.wsr.ordinal(target=config.targetElo, alpha=200 / config.model.sigma)),
@@ -509,7 +513,7 @@ def uploadSailors(people, connection, config : Config, batch_size=300):
             avg_cr,
             int(p.cross),
             int(p.outLinks),
-            p.year
+            nanToNone(p.year)
         ))
         
         # raceCounts = (lambda rc_norm, ps: {
