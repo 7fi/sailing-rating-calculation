@@ -198,11 +198,31 @@ def buildRivals(dfr: pd.DataFrame, config: Config):
 
 def uploadRivals(df_rivals, connection, batch_size=10_000):
     print("Uploading Rivals")
-    rival_rows = list(df_rivals.itertuples(index=False, name=None))
-    
+    key = ["sailor_key", "opponent_key", "position", "season"]
+
+    # Only a few thousand of the ~3M rivalries change between runs, so read back what the
+    # table already holds and send just the rows that are new or whose counts moved.
+    # Reading the table is a few seconds; rewriting all of it is what made this slow.
+    with connection.cursor() as cursor:
+        cursor.execute("SELECT sailorID, rivalID, position, season, raceCount, winCount FROM SailorRivals")
+        df_existing = pd.DataFrame(cursor.fetchall(), columns=key + ["oldTotal", "oldWins"])
+
+    # Merges can map two keys onto one rivalry. Uploading row by row let the last one win,
+    # so keep the last one here too.
+    df_rivals = df_rivals.drop_duplicates(key, keep="last")
+    merged = df_rivals.merge(df_existing, on=key, how="left", indicator=True)
+    changed = (
+        (merged["_merge"] == "left_only")
+        | (merged["total"] != merged["oldTotal"])
+        | (merged["wins"] != merged["oldWins"])
+    )
+    print(f"{changed.sum()} of {len(df_rivals)} rivals are new or changed")
+
+    rival_rows = list(df_rivals[changed.to_numpy()].itertuples(index=False, name=None))
+
     with connection.cursor() as cursor:
         for i in range(0, len(rival_rows), batch_size):
-            print(f"uploading {i}/{len(rival_rows)}")
+            print(f"uploading rivals {i}/{len(rival_rows)}")
             batch = rival_rows[i:i + batch_size]
             cursor.executemany("""
                 INSERT INTO SailorRivals (
