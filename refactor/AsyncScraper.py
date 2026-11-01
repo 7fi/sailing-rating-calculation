@@ -307,9 +307,10 @@ def processTeamRegatta(regattaID, allRaces, sailors, reportPage, raceDate):
     return data, totalSailors
 
 def processFleetRegatta(regattaID, fullScores, sailors, scoring, raceDate):
-    
+
     finalRaces = []
-    
+    results = []
+
     if len(fullScores.find_all('table', class_="results")) == 0: 
         print(f"no scores entered for {regattaID}, skipping")
         return
@@ -349,6 +350,20 @@ def processFleetRegatta(regattaID, fullScores, sailors, scoring, raceDate):
             print(teamScores)
             print(teamName)
             print(regattaID)
+
+        # Techscore's own standings, recorded before the RP checks below so a team that
+        # entered no sailors still gets a placement. The place already has tiebreakers
+        # applied and the total already includes team penalties.
+        results.append({
+            'Regatta': regattaID,
+            'Team': teamHome,
+            'Teamlink': teamLink,
+            'TeamBoatName': teamName,
+            'Place': int(scoreData[(i*(numDivisions + 1)) - (numDivisions + 1)].contents[1].text),
+            'Points': int(scoreData[(i*(numDivisions + 1)) - 1].contents[-1].text),
+            'TotalBoats': teamCount,
+            'Scoring': scoring,
+        })
 
         # teamNameEls = [i.parent for i in sailors.find_all('a') if i['href'] == teamLink] # this actually doesnt work because what if teams have two boats...
         teamNameEls = [i for i in sailors.find_all('td', class_="teamname") if i.text == teamName and i.previous_sibling.find('a')['href'].split("/")[2] == teamLink]
@@ -475,8 +490,8 @@ def processFleetRegatta(regattaID, fullScores, sailors, scoring, raceDate):
     #                     # print('Duplicate score found in', regatta, race)
     #                     # print(score['Score'], score['Sailor'])
     #                     print(f"Duplicate score found in {regatta} race:{str(race)} score:{str(score['Score'])} {score['Sailor']}")
-    
-    return finalRaces
+
+    return {'races': finalRaces, 'results': results}
 
 async def process_in_process(executor, result):
     loop = asyncio.get_event_loop()
@@ -544,23 +559,29 @@ def dropRescrapedRegattas(df_races, df_new):
     return df_races.loc[~stale]
 
 
-def runFleetScrape(loadfile, outfile):
+def runFleetScrape(loadfile, outfile, resultsLoadfile, resultsOutfile):
     print("----SCRAPING FLEET RACING----")
     start = time.time()
     seasons = [sub for s in [[f"s{i}",f"f{i}"] for i in range(10,27)] for sub in s]
     # seasons = ['s14', 'f14']
-    
+
     # seasons = ['f25']
 
     df_races = pd.DataFrame()
     try:
         print("attempting to read from file")
-        df_races = pd.read_parquet(loadfile) 
+        df_races = pd.read_parquet(loadfile)
         print("read from file")
     except:
-        df_races = pd.DataFrame(columns=["Score", "penalty", "Div", "Sailor", "Link", "key", "GradYear", "Position", "Partner", "Venue", "Regatta", "Scoring", "raceID", "adjusted_raceID", "Date", "raceNum", "Team", "Teamlink", "Boat", "TeamBoatName", "updatedAt"]) 
+        df_races = pd.DataFrame(columns=["Score", "penalty", "Div", "Sailor", "Link", "key", "GradYear", "Position", "Partner", "Venue", "Regatta", "Scoring", "raceID", "adjusted_raceID", "Date", "raceNum", "Team", "Teamlink", "Boat", "TeamBoatName", "updatedAt"])
+
+    try:
+        df_results = pd.read_parquet(resultsLoadfile)
+    except:
+        df_results = pd.DataFrame(columns=["Regatta", "Team", "Teamlink", "TeamBoatName", "Place", "Points", "TotalBoats", "Scoring"])
 
     racesRegattas = df_races['Regatta'].unique()
+    resultsRegattas = set(df_results['Regatta'].unique())
     
     try:
         with open("pages/scrape_state.json", "r") as f:
@@ -588,10 +609,12 @@ def runFleetScrape(loadfile, outfile):
             scoring = link.parent.next_sibling.next_sibling.next_sibling.text
             regatta_date = link.parent.next_sibling.next_sibling.next_sibling.next_sibling.text
                 
-            regatta_link = season + "/" + link['href']
+            # Techscore hrefs are absolute ("/f11/slug/"), so keep only the slug to match stored IDs
+            regatta_link = season + "/" + link['href'].strip("/").split("/")[-1]
             recent = season in seasons[-2:]
-            missing = regatta_link not in racesRegattas
-            
+            # A regatta scraped before results were recorded is reprocessed once to fill them in
+            missing = regatta_link not in racesRegattas or regatta_link not in resultsRegattas
+
             # if regatta_link == 'f25/34th-captain-hurst-bowl':
             if scoring in validScorings and (missing or recent):
                 meta = scrape_state.setdefault(regatta_link, {'full-scores' : {}, 'sailors' : {}})
@@ -602,7 +625,8 @@ def runFleetScrape(loadfile, outfile):
     if len(regattas.values()) > 0:        
         totalRows = asyncio.run(main(regattas))
         # processFleetRegatta returns None for a regatta with no scores entered yet.
-        totalRows = [sub for row in totalRows if row for sub in row]
+        totalResults = [sub for row in totalRows if row for sub in row['results']]
+        totalRows = [sub for row in totalRows if row for sub in row['races']]
 
         with open("pages/scrape_state.json", "w") as f:
             json.dump(scrape_state, f, indent=2)
@@ -615,13 +639,18 @@ def runFleetScrape(loadfile, outfile):
         df_races["Date"] = pd.to_datetime(df_races["Date"], errors="raise")
         df_races["raceNum"] = pd.to_numeric(df_races["raceNum"], errors="raise")
         df_races.to_parquet(outfile, index=False)
-        
+
+        df_newResults = pd.DataFrame(totalResults)
+        df_results = dropRescrapedRegattas(df_results, df_newResults)
+        df_results = pd.concat([df_results, df_newResults]).reset_index(drop=True)
+        df_results.to_parquet(resultsOutfile, index=False)
+
     else:
         print("no new races to be scraped.")
 
     end = time.time()
     print(f"{int((end-start) // 60)}:{int((end-start) % 60)}")
-    return df_races
+    return df_races, df_results
 
 if __name__ == "__main__":
-    runFleetScrape("racesfr.parquet", "racesfr.parquet")
+    runFleetScrape("racesfr.parquet", "racesfr.parquet", "resultsfr.parquet", "resultsfr.parquet")

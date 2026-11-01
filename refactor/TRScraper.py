@@ -343,9 +343,11 @@ def setup(infile):
       if rescrape:
           print(link['href'], regatta_date)
           
-      scrape = (season + "/" + link['href']) not in df_old['Regatta'].unique() or rescrape
+      # Techscore hrefs are absolute ("/f16/slug/"), so keep only the slug to match stored IDs
+      regatta_link = season + "/" + link['href'].strip("/").split("/")[-1]
+      scrape = regatta_link not in df_old['Regatta'].unique() or rescrape
       if (scoring == "Team") and scrape:
-          regattas[season + "/" + link['href']] = {"link":season + "/" + link['href'], "scoring": scoring, 'rescrape': rescrape}
+          regattas[regatta_link] = {"link": regatta_link, "scoring": scoring, 'rescrape': rescrape}
   print(len(regattas))
   
 #   regattas = {'s26/harvard-women-team-race': {"link": 's26/harvard-women-team-race', "scoring": 'team', 'rescrape': True}}

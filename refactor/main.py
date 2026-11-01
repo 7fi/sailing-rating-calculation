@@ -12,7 +12,7 @@ from calculationsTR import calculateTR
 
 from chatRivals import buildRivals, uploadRivals
 
-from uploadScores import uploadScoresBySailor, uploadAllScores, updateHomepageStats
+from uploadScores import uploadAllScores, uploadRegattaResults, updateHomepageStats
 from Teams import uploadTeams
 
 from Sailors import Sailor, setupPeople, handleMerges, outputSailorsToFile, calculateSailorRanks, uploadSailors, updateSailorRatios
@@ -210,7 +210,7 @@ def calculateAllRaces(people, df_races, regatta_info, calculatedAtDict: dict, co
     
     return people, allFrRaces, allTrRaces
 
-def upload(people : dict[str, Sailor], df_frAfter, df_trAfter, df_rivals, outlinks_dict, racecounts_dict, winp_dict, team_link_map, config: Config):
+def upload(people : dict[str, Sailor], df_frAfter, df_trAfter, df_results_fr, df_rivals, outlinks_dict, racecounts_dict, winp_dict, team_link_map, config: Config):
     # Create a connection
     connection = mysql.connector.connect(
         host=os.getenv('DB_HOST'),
@@ -224,6 +224,7 @@ def upload(people : dict[str, Sailor], df_frAfter, df_trAfter, df_rivals, outlin
     uploadSailors(people, connection, config)
     uploadTeams(people, outlinks_dict, racecounts_dict, winp_dict, team_link_map, connection, config)
     uploadAllScores(df_frAfter, df_trAfter, connection)
+    uploadRegattaResults(df_results_fr, connection)
     uploadRivals(df_rivals, connection)
     updateHomepageStats(connection)
     
@@ -233,12 +234,13 @@ def load(rootDir : str, config: Config):
     load_dotenv()
     
     if config.doScrape:
-        df_races_fr = runFleetScrape("racesfr.parquet", "racesfr.parquet") 
+        df_races_fr, df_results_fr = runFleetScrape("racesfr.parquet", "racesfr.parquet", "resultsfr.parquet", "resultsfr.parquet")
         df_races_tr = scrapeTR("racesTR.parquet", "racesTR.parquet", "trSailorInfoAll.json")
         df_sailor_info = runSailorData("racesfr.parquet", "trSailorInfoAll.json", "sailor_data2.parquet", "sailor_data2.parquet")
-    else: 
+    else:
         print("Reading from files.")
         df_races_fr = pd.read_parquet(rootDir + "racesfr.parquet")
+        df_results_fr = pd.read_parquet(rootDir + "resultsfr.parquet")
         df_races_tr = pd.read_parquet(rootDir + "racesTR.parquet")
         df_sailor_info = pd.read_parquet(rootDir + "sailor_data2.parquet")
         
@@ -261,14 +263,14 @@ def load(rootDir : str, config: Config):
     except FileNotFoundError:
         calculatedAtDict = {}
     
-    return df_races_full, df_sailor_info, df_sailor_ratings, calculatedAtDict
+    return df_races_full, df_results_fr, df_sailor_info, df_sailor_ratings, calculatedAtDict
 # %%
 def main(rootDir : str = "", jupyter = False):
     # %% Load Files
-    
+
     config : Config = Config()
 
-    df_races_full, df_sailor_info, df_sailor_ratings, calculatedAtDict = load(rootDir, config)
+    df_races_full, df_results_fr, df_sailor_info, df_sailor_ratings, calculatedAtDict = load(rootDir, config)
     
     # df_races_full = df_races_full.loc[df_races_full['season'] == 'f25']
 
@@ -284,7 +286,12 @@ def main(rootDir : str = "", jupyter = False):
     # %% Calculations
     regatta_info = calculateAllRegattaInfo(people, df_races_full, calculatedAtDict, config)
     people, allFrRaces, allTrRaces = calculateAllRaces(people, df_races_full, regatta_info, calculatedAtDict, config)
-    
+
+    # Women's regattas are only known from the sailors' genders. A regatta with no RP
+    # entered has no sailors to go on, so it is treated as open.
+    regattaRatingTypes = {name[0]: info['ratingType'] for name, info in regatta_info.items()}
+    df_results_fr['ratingType'] = df_results_fr['Regatta'].map(regattaRatingTypes).fillna('fr')
+
     del regatta_info
     
     df_cleaned = df_races_full.dropna(
@@ -364,7 +371,7 @@ def main(rootDir : str = "", jupyter = False):
     # %% Upload data
     if config.doUpload:
         print("Uploading to db")
-        upload(people, df_frAfter, df_trAfter, df_rivals, outlinks_dict, racecounts_dict, winp_dict, team_link_map, config)
+        upload(people, df_frAfter, df_trAfter, df_results_fr, df_rivals,outlinks_dict, racecounts_dict, winp_dict, team_link_map, config)
 
 # %% Main 
 if __name__ == "__main__":

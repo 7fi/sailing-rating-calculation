@@ -67,6 +67,49 @@ def deleteStaleScores(table, keyCols, cols, csvPath, upload_df, connection, batc
     print(f"Removed {removed} stale rows from {table} across {len(scope)} regattas")
 
 
+def writeLoadFile(upload_df, table, cols, path):
+    # na_rep below writes \N, which LOAD DATA only reads as NULL while it is left
+    # unescaped. QUOTE_NONE escaping would turn it into the literal string "\N", so
+    # refuse rather than quietly writing that.
+    nullCols = [c for c in cols if upload_df[c].isna().any()]
+    if nullCols:
+        raise ValueError(f"Null values in {table} columns {nullCols}; LOAD DATA cannot represent them here")
+
+    # Tab separated, and escaped the way LOAD DATA reads it by default: backslash
+    # escapes, no quoting. pandas' default QUOTE_MINIMAL disagrees on both counts -
+    # it wraps a field containing a quote in quotes that LOAD DATA does not strip
+    # (so Tyler "TMAC" Macdonald landed in the DB as "Tyler ""TMAC"" Macdonald"),
+    # and it leaves backslashes unescaped for LOAD DATA to swallow (so O\'Connell
+    # became O'Connell). QUOTE_NONE with escapechar makes the two sides agree.
+    upload_df.to_csv(path, index=False, header=False, sep='\t', na_rep='\\N',
+                     encoding='utf-8', quoting=csv.QUOTE_NONE, escapechar='\\')
+
+
+def uploadRegattaResults(df_results, connection):
+    """Upload each boat's final standing in every scraped fleet regatta, as Techscore lists it."""
+    cols = ['season', 'regatta', 'place', 'teamID', 'boatName', 'points', 'totalBoats', 'ratingType', 'scoring']
+    # Techscore always numbers places 1..N with tiebreakers applied, so the place identifies
+    # a boat - a school's name plus boat name does not (a few regattas repeat one).
+    keyCols = ['season', 'regatta', 'place']
+
+    upload_df = df_results.rename(columns={
+        'Team': 'teamID', 'TeamBoatName': 'boatName', 'Place': 'place', 'Points': 'points',
+        'TotalBoats': 'totalBoats', 'Scoring': 'scoring',
+    })
+    upload_df[['season', 'regatta']] = upload_df['Regatta'].str.split('/', n=1, expand=True)
+    upload_df = upload_df.reindex(columns=cols)
+
+    with tempfile.NamedTemporaryFile(mode='w+', suffix='.csv', delete=True) as temp_file:
+        writeLoadFile(upload_df, 'RegattaResults', cols, temp_file.name)
+        temp_file.flush()
+
+        with connection.cursor() as cursor:
+            cursor.execute(loadInfileSql(temp_file.name, 'RegattaResults', cols))
+        connection.commit()
+
+        deleteStaleScores('RegattaResults', keyCols, cols, temp_file.name, upload_df, connection)
+
+
 def uploadAllScores(allFrRows, allTrRows, connection, batch_size=10_000):
 
     fleet_columns = [
@@ -93,22 +136,8 @@ def uploadAllScores(allFrRows, allTrRows, connection, batch_size=10_000):
         upload_df = upload_df.reindex(columns=cols)
         upload_df['date'] = pd.to_datetime(upload_df['date'], unit='s')
 
-        # na_rep below writes \N, which LOAD DATA only reads as NULL while it is left
-        # unescaped. QUOTE_NONE escaping would turn it into the literal string "\N", so
-        # refuse rather than quietly writing that.
-        nullCols = [c for c in cols if upload_df[c].isna().any()]
-        if nullCols:
-            raise ValueError(f"Null values in {table} columns {nullCols}; LOAD DATA cannot represent them here")
-
         with tempfile.NamedTemporaryFile(mode='w+', suffix='.csv', delete=True) as temp_file:
-            # Tab separated, and escaped the way LOAD DATA reads it by default: backslash
-            # escapes, no quoting. pandas' default QUOTE_MINIMAL disagrees on both counts -
-            # it wraps a field containing a quote in quotes that LOAD DATA does not strip
-            # (so Tyler "TMAC" Macdonald landed in the DB as "Tyler ""TMAC"" Macdonald"),
-            # and it leaves backslashes unescaped for LOAD DATA to swallow (so O\'Connell
-            # became O'Connell). QUOTE_NONE with escapechar makes the two sides agree.
-            upload_df.to_csv(temp_file.name, index=False, header=False, sep='\t', na_rep='\\N',
-                             encoding='utf-8', quoting=csv.QUOTE_NONE, escapechar='\\')
+            writeLoadFile(upload_df, table, cols, temp_file.name)
             temp_file.flush() # Ensure all data is written to disk
 
             # 3. The SQL Command
