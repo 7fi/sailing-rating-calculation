@@ -133,10 +133,16 @@ def calculateAvgRating(people : list[Sailor], config:Config):
     return sum(ratings) / len(ratings) if len(ratings) > 0 else 0
     
 def uploadTeams(people: dict[str, Sailor], outlinks_dict, racecounts_dict, winp_dict, team_link_map, connection, config: Config):
+    # Group by season entries, not p.teams: p.teams comes from sailor info and goes stale when a team is renamed
+    sailorsByTeam : dict[str, list[Sailor]] = {}
+    for p in people.values():
+        for t in {t for pos in ('skipper', 'crew') for _, t in p.seasons[pos]}:
+            sailorsByTeam.setdefault(t, []).append(p)
+
     for team, region in teamRegions.items():
         # if team != 'MIT':
         #     continue
-        sailors : list[Sailor] = [p for key, p in people.items() if team in p.teams]
+        sailors : list[Sailor] = sailorsByTeam.get(team, [])
         currentSailors : list[Sailor] = [p for p in sailors if p.isOnTeamInSeasons(team, config.targetSeasons)]
         
         topRating, topSkippers, topCrews = calculateTopSailors(currentSailors, outlinks_dict, False, False, config)
