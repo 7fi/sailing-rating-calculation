@@ -1,4 +1,5 @@
 import numpy as np
+import pandas as pd
 from regions import teamRegions
 from config import Config
 from Sailors import Sailor
@@ -32,11 +33,11 @@ def updateCrossLinks(sailor, isCross, regions, race, config : Config):
         # print("None found in list of regions!!!")
         return outLinks
     
-    # Only calculate number of cross regional sailors if it is the current season
-    doCr = race.split("/")[0] in config.targetSeasons and isCross == 1
+    # Counted across every season, not just the target ones: ratings carry over between
+    # seasons, so career links are what tie a sailor's rating to other regions.
     sailorReg = ('PCCSC' if teamRegions[sailor.teams[-1]] == 'NWICSA' else teamRegions[sailor.teams[-1]])
-    
-    if isCross: # and doCr
+
+    if isCross:
         # Calculate the number of sailors that are not in the sailor's region
         outLinks = sum(1 for reg in regions if reg != sailorReg)
         # Note: We don't need to filter out the sailor themselves from this list, because they will have the same region as themseleves so it will not be counted.
@@ -45,7 +46,7 @@ def updateCrossLinks(sailor, isCross, regions, race, config : Config):
     
     return outLinks
 
-def updateRaces(newRaces, venue, actualIDs, penalties, racers : list[Sailor], scoreVals, predictions, partnerKeys, partnerNames, startingRating, ratings, teams, teamBoatNames, boatType, race, scoring, season, date, womens, regattaAvg, pos, config : Config):
+def updateRaces(newRaces, venue, actualIDs, penalties, racers : list[Sailor], scoreVals, predictions, partnerKeys, partnerNames, startingRating, ratings, teams, teamBoatNames, boatType, race, scoring, season, date, womens, regattaAvg, pos, config : Config, boats : int):
     if pos.lower() not in ['skipper', 'crew']:
         print("Pos is weird value in updateRaces ", pos)
 
@@ -77,7 +78,9 @@ def updateRaces(newRaces, venue, actualIDs, penalties, racers : list[Sailor], sc
             'partnerName': partnerName,
             'score': int(score),
             'predicted': pred[0],
-            'ratio': 1 - ((int(score) - 1) / (len(racers) - 1)),
+            # Share of the fleet beaten. Scores past the last boat (DNF, DSQ, penalty
+            # points) clamp to 0 so they count as a poor finish instead of going negative.
+            'ratio': min(1.0, max(0.0, 1 - ((int(score) - 1) / (boats - 1)))),
             'penalty': penalty,
             'position': pos,
             'date': date,
@@ -182,4 +185,9 @@ def calculateFR(newRaces : list, people : dict[str, Sailor], resetDate, date, re
 
     updateRatings(racers, ratings, pos, womens)
     
-    updateRaces(newRaces, venue, actualIDs, penalties, racers, scoreVals, predictions, partnerKeys, partnerNames, startingRating, ratings, teams, teamBoatNames, boatType, race, scoring, season, date, womens, regattaAvg, pos, config)
+    # Boats that sailed the race, from the regatta's results; fall back to the racers
+    # present if there are none. Never fewer than the racers, so the ratio stays defined.
+    boatsInRace = scores['boatsInRace'].iat[0] if 'boatsInRace' in scores else np.nan
+    boats = max(int(boatsInRace) if pd.notna(boatsInRace) else 0, len(racers))
+
+    updateRaces(newRaces, venue, actualIDs, penalties, racers, scoreVals, predictions, partnerKeys, partnerNames, startingRating, ratings, teams, teamBoatNames, boatType, race, scoring, season, date, womens, regattaAvg, pos, config, boats)

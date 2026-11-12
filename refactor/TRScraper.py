@@ -5,7 +5,46 @@ import numpy as np
 from datetime import date
 from datetime import date, datetime
 import os
+import time
 from pageCache import readPage, writePage
+
+def readCachedPage(path):
+  """The cached HTML at path, or None if there is none or it is not a regatta page.
+
+  Error responses used to be cached like any other page and then read back on every
+  run, so a regatta whose first fetch failed was skipped for good. Every real regatta
+  page carries the location tag; a cached 404 page does not.
+  """
+  if not os.path.exists(path):
+    return None
+  html = readPage(path)
+  return html if 'itemprop="location"' in html else None
+
+def fetchPage(url, path, retries=5):
+  """Fetch url and cache it at path, retrying transient failures.
+
+  Returns the HTML, or None if the page could not be fetched. Only a 200 response is
+  cached, so a failed regatta is simply fetched again on the next run.
+  """
+  backoff = 1
+  error = None
+  for attempt in range(retries):
+    try:
+      page = requests.get(url, timeout=30)
+    except requests.RequestException as e:
+      error = e
+    else:
+      if page.status_code == 200:
+        writePage(path, page)
+        return page.text
+      error = page.status_code
+      if page.status_code != 429 and page.status_code < 500:
+        break  # not worth retrying
+    if attempt < retries - 1:
+      time.sleep(backoff)
+      backoff *= 2
+  print(f"Could not fetch {url} ({error}). Skipping...")
+  return None
 
 def makeRaceList(raceRows):
   raceList = []
@@ -359,37 +398,30 @@ def setup(infile):
       link = regatta['link']
       rescrape = regatta['rescrape']
       
-      allRaces = sailors = report = None
       regattaID = list(regattas.keys())[i]
-      
+
       if not os.path.exists(f"pagesTR/{link.split("/")[0]}"):
           os.makedirs(f"pagesTR/{link.split("/")[0]}")
-      if os.path.exists(f"pagesTR/{link}-allraces.html") and os.path.exists(f"pagesTR/{link}-sailors.html") and os.path.exists(f"pagesTR/{link}-report.html") and not rescrape:
+
+      # (soup name, url ending, cache file suffix)
+      pageSpecs = [('allRaces', 'all/', 'allraces'), ('sailors', 'sailors/', 'sailors'), ('report', '', 'report')]
+      cached = {} if rescrape else {name: readCachedPage(f"pagesTR/{link}-{suffix}.html") for name, _, suffix in pageSpecs}
+
+      if not rescrape and all(cached.values()):
           if i % 50 == 0:
               print(f"({i + 1}/{len(list(regattas.values()))}) getting soup from file for {regattaID}")
-          allRaces = BeautifulSoup(readPage(f"pagesTR/{link}-allraces.html"), 'html.parser')
-          sailors = BeautifulSoup(readPage(f"pagesTR/{link}-sailors.html"), 'html.parser')
-          report = BeautifulSoup(readPage(f"pagesTR/{link}-report.html"), 'html.parser')
+          htmls = cached
       else:
           print(f"({i + 1}/{len(list(regattas.values()))}) getting soup for {regattaID}")
-          # all races
-          url = f"https://scores.collegesailing.org/{regatta['link']}/all/"
-          page = requests.get(url)
-          writePage(f"pagesTR/{link}-allraces.html", page)
-          allRaces = BeautifulSoup(page.text, 'html.parser')
+          htmls = {name: fetchPage(f"https://scores.collegesailing.org/{link}/{ending}", f"pagesTR/{link}-{suffix}.html")
+                   for name, ending, suffix in pageSpecs}
+          if not all(htmls.values()):
+              # Left out of this run entirely; it is not in df_old, so the next run tries again.
+              print(f"Skipping {regattaID}: not every page could be fetched")
+              continue
 
-          # sailors
-          url = f"https://scores.collegesailing.org/{regatta['link']}/sailors/"
-          page = requests.get(url)
-          writePage(f"pagesTR/{link}-sailors.html", page)
-          sailors = BeautifulSoup(page.text, 'html.parser')
-
-          url = f"https://scores.collegesailing.org/{regatta['link']}/"
-          page = requests.get(url)
-          writePage(f"pagesTR/{link}-report.html", page)
-          report = BeautifulSoup(page.text, 'html.parser')
-      
-      regattaSoups[regattaID] = {"allRaces": allRaces, "sailors": sailors, 'report': report, "scoring": regatta['scoring']}
+      regattaSoups[regattaID] = {name: BeautifulSoup(html, 'html.parser') for name, html in htmls.items()}
+      regattaSoups[regattaID]['scoring'] = regatta['scoring']
       
   return regattaSoups, df_old, regattas
         

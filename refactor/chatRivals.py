@@ -9,7 +9,9 @@ def buildRivals(dfr: pd.DataFrame, config: Config):
 
     # Split fleet and team races
     dfr["season"] = dfr["adjusted_raceID"].str.split("/").str[0]
-    fleet_df = dfr[dfr["Scoring"] != "fleet"].copy()
+    # Rows without a score (a division that did not complete the race) are skipped by the
+    # rating calculation too, and have no order to compare.
+    fleet_df = dfr[(dfr["Scoring"] != "team") & dfr["Score"].notna()].copy()
     team_df = dfr[dfr["Scoring"] == "team"].copy()
 
     # Build sailor ID map from ALL races
@@ -67,6 +69,7 @@ def buildRivals(dfr: pd.DataFrame, config: Config):
 
         order = race_scores.argsort()
         race_sailors = race_sailors[order]
+        race_scores = race_scores[order]
 
         n = len(race_sailors)
 
@@ -79,7 +82,9 @@ def buildRivals(dfr: pd.DataFrame, config: Config):
                 key_win = (a, pos_id, b, season_id)
                 key_loss = (b, pos_id, a, season_id)
 
-                rivals[key_win][0] += 1
+                # A tie counts as a race for both and a win for neither.
+                if race_scores[i] < race_scores[j]:
+                    rivals[key_win][0] += 1
                 rivals[key_win][1] += 1
                 rivals[key_loss][1] += 1
 

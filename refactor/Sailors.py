@@ -64,7 +64,7 @@ class Sailor:
         prefix += 't' if typ == 'team' else ''
         part = 's' if pos == 'skipper' else 'c'
         ratingObj = getattr(self, f"{prefix}{part}r")
-        if ordinal and Config is not None:
+        if ordinal and config is not None:
             return ratingObj.ordinal(target=config.targetElo,
                                        alpha=config.alpha)
         return ratingObj
@@ -298,11 +298,18 @@ def validPerson(p, type, config: Config):
             # and sum([p['raceCount'][seas] for seas in targetSeasons if seas in p['raceCount'].keys()]) > 5
             )
 
-def outputSailorsToFile(people, rootDir, config: Config ):
+def outputSailorsToFile(people, rootDir, config: Config, raceCounts: dict = None):
+    """Serialize sailors to sailors-latest.json.
+
+    numRaces/outLinks/Cross come from the Sailor attributes and the supplied race
+    counts, not from p.races: the calculation pass never populates p.races, so
+    deriving them from it wrote 0 for every sailor.
+    """
+    raceCounts = raceCounts or {}
     allRows = []
     for sailor, p in people.items():
 
-        allRows.append([p.name, len(p.races), sailor,
+        allRows.append([p.name, raceCounts.get(sailor, 0), sailor,
                         p.skipperRank, p.crewRank, p.womenSkipperRank,
                         p.womenCrewRank, p.skipperRankTR, p.womenSkipperRankTR, p.crewRankTR, p.womenCrewRankTR,
                         p.teams,
@@ -331,12 +338,10 @@ def outputSailorsToFile(people, rootDir, config: Config ):
                         p.tcr.mu, p.tcr.sigma,
                         p.wtsr.mu, p.wtsr.sigma,
                         p.wtcr.mu, p.wtcr.sigma,
-                        sum([race['outLinks']
-                            for race in p.races if 'outLinks' in race.keys()]),
+                        p.outLinks,
                         p.year, p.links,
                         p.seasons,
-                        sum([race['cross']
-                            for race in p.races if 'cross' in race.keys()]),
+                        p.cross,
                         p.races, p.rivals, p.avgSkipperRatio, p.avgCrewRatio])
 
     df_sailors = pd.DataFrame(allRows, columns=['Sailor', 'numRaces', 'key', 'SkipperRank', 'CrewRank', 'WomenSkipperRank', 'WomenCrewRank', 'TRSkipperRank', 'TRWomenSkipperRank', 'TRCrewRank', 'TRWomenCrewRank', 'Teams', 'gender',
@@ -373,10 +378,12 @@ def calculateSailorRanks(people : dict[str,Sailor], config : Config):
                       if p.isRankEligible(config.targetSeasons, 'crew', config.gradCutoff)]
 
     # TODO: Count tr and fr seasons seperately
+    # Same seasons as fleet ranks and the team pages, so a team's top team racers are
+    # the ones holding national team race ranks.
     eligible_skippers_tr = [p for p in people.values()
-                            if p.isRankEligible(config.targetTRSeasons, 'skipper', config.gradCutoff, needsOutlinks=False)]
+                            if p.isRankEligible(config.targetSeasons, 'skipper', config.gradCutoff, needsOutlinks=False)]
     eligible_crews_tr = [p for p in people.values()
-                         if p.isRankEligible(config.targetTRSeasons, 'crew', config.gradCutoff, needsOutlinks=False)]
+                         if p.isRankEligible(config.targetSeasons, 'crew', config.gradCutoff, needsOutlinks=False)]
     
     print(len(eligible_skippers_tr))
 
@@ -405,14 +412,21 @@ def calculateSailorRanks(people : dict[str,Sailor], config : Config):
     
     return people
 
-def updateSailorRatios(people: dict[str, Sailor]):
+def updateSailorRatios(people: dict[str, Sailor], df_frAfter: pd.DataFrame):
+    """Set each sailor's average finish ratio per position.
+
+    Derived from the post-calc fleet race frame rather than Sailor.races, which the
+    calculation pass never populates (it set every ratio to 0.0).
+    """
+    if df_frAfter.empty:
+        return
+
+    ratios = df_frAfter.loc[df_frAfter['ratio'].notna()]
+    means = ratios.groupby(['sailorID', ratios['position'].str.lower()])['ratio'].mean()
+
     for key, p in people.items():
-        skipper_ratios = [r['ratio'] for r in p.races if r['pos'].lower() == 'skipper' and 'ratio' in r.keys() and not np.isnan(r['ratio'])]
-        crew_ratios = [r['ratio'] for r in p.races if r['pos'].lower() == 'crew' and 'ratio' in r.keys() and not np.isnan(r['ratio'])]
-        avgSkipperRatio = float(np.mean(skipper_ratios)) if skipper_ratios else 0.0
-        avgCrewRatio = float(np.mean(crew_ratios)) if crew_ratios else 0.0
-        p.avgSkipperRatio = avgSkipperRatio
-        p.avgCrewRatio = avgCrewRatio
+        p.avgSkipperRatio = float(means.get((key, 'skipper'), 0.0))
+        p.avgCrewRatio = float(means.get((key, 'crew'), 0.0))
 
 def getCounts(races):
     # season_counts = defaultdict(int)

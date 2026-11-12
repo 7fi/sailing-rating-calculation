@@ -155,12 +155,14 @@ def parseScore(scoreString):
 
 def addRaces(finalRaces, teamScores, sailors, others, pos, teamHome, host, regatta, teamLink, scoring, boat_type,teamBoatName, raceDate):
     for sailor in sailors:
-        partners = [other['name'] for race in sailor['races'] for other in others if other['div'] == sailor['div'] and race in other['races']]
-        partnerLinks = [other['link'] for race in sailor['races'] for other in others if other['div'] == sailor['div'] and race in other['races']]
         for i, (score, penalty) in enumerate(teamScores[sailor['div']]):
             if i + 1 in sailor['races']:
-                partner = partners[sailor['races'].index(i + 1)] if sailor['races'].index(i + 1) < len(partners) else "Unknown"
-                partnerLink = partnerLinks[sailor['races'].index(i + 1)] if sailor['races'].index(i + 1) < len(partners) else "Unknown"
+                # Look the partner up per race. Indexing into a list flattened across all of
+                # the sailor's races shifted every later partner by one whenever a race had
+                # no partner listed (or two).
+                matches = [other for other in others if other['div'] == sailor['div'] and i + 1 in other['races']]
+                partner = matches[0]['name'] if matches else "Unknown"
+                partnerLink = matches[0]['link'] if matches else "Unknown"
                 finalRaces.append(makeRaceSeries(score, penalty, teamHome, i + 1, sailor['div'], sailor['name'], sailor['link'],sailor['year'], pos, partner, partnerLink, host, regatta, raceDate, teamLink, scoring, boat_type, teamBoatName))
 
 
@@ -346,7 +348,8 @@ def processFleetRegatta(regattaID, fullScores, sailors, scoring, raceDate):
         for d in range(numDivisions):
             teamScores[chr(ord('A') + d)] =[parseScore(scoreData[(i*(numDivisions + 1)) - (numDivisions + 1) + d].contents[j]) for j in range(4, (4 + raceCount))]
             
-        if None in teamScores['A'] or None in teamScores['B'] or None in teamScores['C']:
+        # Each entry is a (score, penalty) tuple, so check the score itself.
+        if any(score is None for div in teamScores.values() for score, _ in div):
             print(teamScores)
             print(teamName)
             print(regattaID)
@@ -422,14 +425,15 @@ def processFleetRegatta(regattaID, fullScores, sailors, scoring, raceDate):
         
         # check for same person in 2 places at once and discard
         # skipper and crew for same boat in same races?
-        for skipper in skippers:
-            for crew in crews:
-                for i,race in enumerate(skipper['races']):
-                    if skipper['name'] == crew['name'] and race in crew['races'] and skipper['div'] == crew['div']:
-                        skippers.remove(skipper)
-                        crews.remove(crew)
-                        print('removed duplicate skipper/crew',skipper['name'],crew['name'], regattaID)
-                        break
+        # Collect the pairs first: removing from the lists while looping over them skipped
+        # the entry after each removal, and could remove the same skipper twice (ValueError).
+        duplicates = [(skipper, crew) for skipper in skippers for crew in crews
+                      if skipper['name'] == crew['name'] and skipper['div'] == crew['div']
+                      and set(skipper['races']) & set(crew['races'])]
+        for skipper, crew in duplicates:
+            skippers = [s for s in skippers if s is not skipper]
+            crews = [c for c in crews if c is not crew]
+            print('removed duplicate skipper/crew', skipper['name'], crew['name'], regattaID)
                         
         # Skipper for both A and B maybe shouldnt be removed? it is legal to do once
         for skipper in skippers:

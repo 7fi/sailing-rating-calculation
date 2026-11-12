@@ -110,25 +110,17 @@ def calculateAvgRatio(filtered_people: list[Sailor], winp_dict):
     return avgRatio
 
 def calculateAvgRating(people : list[Sailor], config:Config):
+    """Average of each sailor's best fleet rating (sr, cr, wsr, wcr).
+
+    Fleet racing only. A rating the sailor has never raced in is left out, and a sailor
+    with no fleet rating at all is left out of the average rather than counted as 0.
+    """
     ratings = []
     for p in people:
-        sr = p.sr.ordinal(target=config.targetElo, alpha=config.alpha)
-        cr = p.cr.ordinal(target=config.targetElo, alpha=config.alpha)
-        wsr = p.wsr.ordinal(target=config.targetElo, alpha=config.alpha)
-        wcr = p.wcr.ordinal(target=config.targetElo, alpha=config.alpha)
-        ratings.append(max([sr if sr != config.targetElo else 0, 
-                         cr if cr != config.targetElo else 0, 
-                         wsr if wsr != config.targetElo else 0, 
-                         wcr if wcr != config.targetElo else 0]))
-        
-        tsr = p.sr.ordinal(target=config.targetElo, alpha=config.alpha)
-        tcr = p.cr.ordinal(target=config.targetElo, alpha=config.alpha)
-        wtsr = p.wsr.ordinal(target=config.targetElo, alpha=config.alpha)
-        wtcr = p.wcr.ordinal(target=config.targetElo, alpha=config.alpha)
-        ratings.append(max([tsr if tsr != config.targetElo else 0, 
-                         tcr if tcr != config.targetElo else 0, 
-                         wtsr if wtsr != config.targetElo else 0, 
-                         wtcr if wtcr != config.targetElo else 0]))
+        rated = [r for r in (p.sr, p.cr, p.wsr, p.wcr)
+                 if (r.mu, r.sigma) != (config.model.mu, config.model.sigma)]
+        if rated:
+            ratings.append(max(r.ordinal(target=config.targetElo, alpha=config.alpha) for r in rated))
 
     return sum(ratings) / len(ratings) if len(ratings) > 0 else 0
     

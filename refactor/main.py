@@ -114,6 +114,23 @@ def getRegAvgTR(people, womens, regatta_data, config : Config):
     
     return regattaAvg
     
+def addBoatsInRace(df_races, df_results):
+    """Add the number of boats that sailed each fleet race, for the finish ratio.
+
+    Counting the race's rows undercounts: a team that entered no sailors still sailed
+    and still took places. Techscore's results list every team, and each team sails one
+    boat per division, so a divisional race has one boat per team and a Combined race,
+    which sails every division together, has teams x divisions.
+    """
+    totalBoats = df_results.groupby('Regatta')['TotalBoats'].max()
+    divisions = df_races.loc[df_races['Scoring'] != 'team'].groupby('Regatta')['Div'].nunique()
+
+    boats = df_races['Regatta'].map(totalBoats)
+    combined = df_races['Scoring'] == 'Combined'
+    boats[combined] *= df_races.loc[combined, 'Regatta'].map(divisions)
+    df_races['boatsInRace'] = boats
+    return df_races
+
 def resetPeopleToBeforeSeason(people : list[Sailor], season : str, ratingType: str):
     for person in people:
         person.resetRatingToBeforeSeason(season, ratingType)
@@ -280,7 +297,8 @@ def main(rootDir : str = "", jupyter = False):
     people = setupPeople(df_sailor_ratings, df_sailor_info, config)
     del df_sailor_info, df_sailor_ratings
     people, df_races_full = handleMerges(df_races_full, people, config)
-    
+    df_races_full = addBoatsInRace(df_races_full, df_results_fr)
+
     print("Setup complete.\nStarting calculations.")
     
     # %% Calculations
@@ -299,8 +317,7 @@ def main(rootDir : str = "", jupyter = False):
     team_link_map = pd.Series(df_cleaned.Teamlink.values, index=df_cleaned.Team).to_dict()
     
     people = calculateSailorRanks(people, config)
-    updateSailorRatios(people)
-    
+
     df_rivals = buildRivals(df_races_full, config)
 
     # Every post-calc row has to still correspond to a scraped race entry. A team that
@@ -335,6 +352,8 @@ def main(rootDir : str = "", jupyter = False):
     df_trAfter = pd.DataFrame(allTrRaces)
     
     del allFrRaces, allTrRaces
+
+    updateSailorRatios(people, df_frAfter)
     # %%
     outlinks_dict = df_frAfter.groupby('sailorID')['outLinks'].sum().to_dict()
     
@@ -349,21 +368,24 @@ def main(rootDir : str = "", jupyter = False):
     racecounts_dict = {}
     for (s_id, pos, season), count in counts.items():
         racecounts_dict.setdefault(s_id, {}).setdefault(pos.lower(), {})[season] = count
-    
+
+    # Total rated races per sailor, for the numRaces field in sailors-latest.json.
+    totalracecounts_dict = counts.groupby(level='sailorID').sum().to_dict()
+
     del counts
     
     print("Calculations finished.\nOutputting to files")
     
     # %% File Output
     
-    outputSailorsToFile(people, rootDir, config)
+    outputSailorsToFile(people, rootDir, config, raceCounts=totalracecounts_dict)
     
     df_rivals.to_parquet(rootDir + 'rivalstesting.parquet')
     
     df_frAfter.to_parquet(rootDir + "postcalcFRraces.parquet")
     df_trAfter.to_parquet(rootDir + "postcalcTRraces.parquet")
     
-    with open("calculated_at_dict.json", "w") as f:
+    with open(rootDir + "calculated_at_dict.json", "w") as f:
         json.dump(calculatedAtDict, f) 
     
     print("File output finished.")
