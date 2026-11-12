@@ -65,9 +65,7 @@ def updateRaces(newRaces, venue, actualID, penalties, racers : list[Sailor], sco
         updateSeasons(sailor, season, team, pos)
 
         ratingType = ('w' if womens else '') + ('s' if pos.lower() == 'skipper' else 'c') + 'r'
-        
-        sailor.outLinks += outLinks
-        
+
         newRaces.append({
             'raceID': actualID,
             'season': actualID.split("/")[0],
@@ -163,6 +161,9 @@ def calculateFR(newRaces : list, people : dict[str, Sailor], resetDate, date, re
 
     if len(active_ratings) < 2:
         return
+    
+    # Make predictions BEFORE updating ratings, so predictions for a race dont consider the outcome of the race
+    predictions = config.model.predict_rank(ratings)
 
     active_ratings = config.model.rate(active_ratings, active_scores)
 
@@ -176,8 +177,6 @@ def calculateFR(newRaces : list, people : dict[str, Sailor], resetDate, date, re
             new_ratings.append(ratings[len(new_ratings)])  # Keep old rating for penalized
 
     ratings = new_ratings
-
-    predictions = config.model.predict_rank(ratings)
 
     updateRatings(racers, ratings, pos, womens)
     
