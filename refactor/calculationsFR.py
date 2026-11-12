@@ -154,6 +154,8 @@ def calculateFR(newRaces : list, people : dict[str, Sailor], resetDate, date, re
     racers : list[Sailor] = getRacers(people, names, keys, teams, regatta, resetDate, date, ratingType)
 
     ratings = [[r.getRating(pos, 'fleet', womens)] for r in racers]
+    
+    predictions = config.model.predict_rank(ratings)
 
     startingRating = [r[0].ordinal(target=config.targetElo, alpha=config.alpha) for r in ratings]
 
@@ -177,8 +179,6 @@ def calculateFR(newRaces : list, people : dict[str, Sailor], resetDate, date, re
             new_ratings.append(ratings[len(new_ratings)])  # Keep old rating for penalized
 
     ratings = new_ratings
-
-    predictions = config.model.predict_rank(ratings)
 
     updateRatings(racers, ratings, pos, womens)
     
