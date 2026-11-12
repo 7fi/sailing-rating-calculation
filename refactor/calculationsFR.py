@@ -169,6 +169,9 @@ def calculateFR(newRaces : list, people : dict[str, Sailor], resetDate, date, re
 
     if len(active_ratings) < 2:
         return
+    
+    # Make predictions BEFORE updating ratings, so predictions for a race dont consider the outcome of the race
+    predictions = config.model.predict_rank(ratings)
 
     active_ratings = config.model.rate(active_ratings, active_scores)
 
