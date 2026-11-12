@@ -9,7 +9,9 @@ def buildRivals(dfr: pd.DataFrame, config: Config):
 
     # Split fleet and team races
     dfr["season"] = dfr["adjusted_raceID"].str.split("/").str[0]
-    fleet_df = dfr[dfr["Scoring"] != "fleet"].copy()
+    # Rows without a score (a division that did not complete the race) are skipped by the
+    # rating calculation too, and have no order to compare.
+    fleet_df = dfr[(dfr["Scoring"] != "team") & dfr["Score"].notna()].copy()
     team_df = dfr[dfr["Scoring"] == "team"].copy()
 
     # Build sailor ID map from ALL races
@@ -67,6 +69,7 @@ def buildRivals(dfr: pd.DataFrame, config: Config):
 
         order = race_scores.argsort()
         race_sailors = race_sailors[order]
+        race_scores = race_scores[order]
 
         n = len(race_sailors)
 
@@ -79,7 +82,9 @@ def buildRivals(dfr: pd.DataFrame, config: Config):
                 key_win = (a, pos_id, b, season_id)
                 key_loss = (b, pos_id, a, season_id)
 
-                rivals[key_win][0] += 1
+                # A tie counts as a race for both and a win for neither.
+                if race_scores[i] < race_scores[j]:
+                    rivals[key_win][0] += 1
                 rivals[key_win][1] += 1
                 rivals[key_loss][1] += 1
 
@@ -198,11 +203,31 @@ def buildRivals(dfr: pd.DataFrame, config: Config):
 
 def uploadRivals(df_rivals, connection, batch_size=10_000):
     print("Uploading Rivals")
-    rival_rows = list(df_rivals.itertuples(index=False, name=None))
-    
+    key = ["sailor_key", "opponent_key", "position", "season"]
+
+    # Only a few thousand of the ~3M rivalries change between runs, so read back what the
+    # table already holds and send just the rows that are new or whose counts moved.
+    # Reading the table is a few seconds; rewriting all of it is what made this slow.
+    with connection.cursor() as cursor:
+        cursor.execute("SELECT sailorID, rivalID, position, season, raceCount, winCount FROM SailorRivals")
+        df_existing = pd.DataFrame(cursor.fetchall(), columns=key + ["oldTotal", "oldWins"])
+
+    # Merges can map two keys onto one rivalry. Uploading row by row let the last one win,
+    # so keep the last one here too.
+    df_rivals = df_rivals.drop_duplicates(key, keep="last")
+    merged = df_rivals.merge(df_existing, on=key, how="left", indicator=True)
+    changed = (
+        (merged["_merge"] == "left_only")
+        | (merged["total"] != merged["oldTotal"])
+        | (merged["wins"] != merged["oldWins"])
+    )
+    print(f"{changed.sum()} of {len(df_rivals)} rivals are new or changed")
+
+    rival_rows = list(df_rivals[changed.to_numpy()].itertuples(index=False, name=None))
+
     with connection.cursor() as cursor:
         for i in range(0, len(rival_rows), batch_size):
-            print(f"uploading {i}/{len(rival_rows)}")
+            print(f"uploading rivals {i}/{len(rival_rows)}")
             batch = rival_rows[i:i + batch_size]
             cursor.executemany("""
                 INSERT INTO SailorRivals (

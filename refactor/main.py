@@ -12,7 +12,7 @@ from calculationsTR import calculateTR
 
 from chatRivals import buildRivals, uploadRivals
 
-from uploadScores import uploadScoresBySailor, uploadAllScores, updateHomepageStats
+from uploadScores import uploadAllScores, uploadRegattaResults, updateHomepageStats
 from Teams import uploadTeams
 
 from Sailors import Sailor, setupPeople, handleMerges, outputSailorsToFile, calculateSailorRanks, uploadSailors, updateSailorRatios
@@ -114,6 +114,23 @@ def getRegAvgTR(people, womens, regatta_data, config : Config):
     
     return regattaAvg
     
+def addBoatsInRace(df_races, df_results):
+    """Add the number of boats that sailed each fleet race, for the finish ratio.
+
+    Counting the race's rows undercounts: a team that entered no sailors still sailed
+    and still took places. Techscore's results list every team, and each team sails one
+    boat per division, so a divisional race has one boat per team and a Combined race,
+    which sails every division together, has teams x divisions.
+    """
+    totalBoats = df_results.groupby('Regatta')['TotalBoats'].max()
+    divisions = df_races.loc[df_races['Scoring'] != 'team'].groupby('Regatta')['Div'].nunique()
+
+    boats = df_races['Regatta'].map(totalBoats)
+    combined = df_races['Scoring'] == 'Combined'
+    boats[combined] *= df_races.loc[combined, 'Regatta'].map(divisions)
+    df_races['boatsInRace'] = boats
+    return df_races
+
 def resetPeopleToBeforeSeason(people : list[Sailor], season : str, ratingType: str):
     for person in people:
         person.resetRatingToBeforeSeason(season, ratingType)
@@ -210,7 +227,7 @@ def calculateAllRaces(people, df_races, regatta_info, calculatedAtDict: dict, co
     
     return people, allFrRaces, allTrRaces
 
-def upload(people : dict[str, Sailor], df_frAfter, df_trAfter, df_rivals, outlinks_dict, racecounts_dict, winp_dict, team_link_map, config: Config):
+def upload(people : dict[str, Sailor], df_frAfter, df_trAfter, df_results_fr, df_rivals, outlinks_dict, racecounts_dict, winp_dict, team_link_map, config: Config):
     # Create a connection
     connection = mysql.connector.connect(
         host=os.getenv('DB_HOST'),
@@ -224,6 +241,7 @@ def upload(people : dict[str, Sailor], df_frAfter, df_trAfter, df_rivals, outlin
     uploadSailors(people, connection, config)
     uploadTeams(people, outlinks_dict, racecounts_dict, winp_dict, team_link_map, connection, config)
     uploadAllScores(df_frAfter, df_trAfter, connection)
+    uploadRegattaResults(df_results_fr, connection)
     uploadRivals(df_rivals, connection)
     updateHomepageStats(connection)
     
@@ -233,12 +251,13 @@ def load(rootDir : str, config: Config):
     load_dotenv()
     
     if config.doScrape:
-        df_races_fr = runFleetScrape("racesfrtest.parquet", "racesfrtest.parquet") 
+        df_races_fr, df_results_fr = runFleetScrape("racesfr.parquet", "racesfr.parquet", "resultsfr.parquet", "resultsfr.parquet")
         df_races_tr = scrapeTR("racesTR.parquet", "racesTR.parquet", "trSailorInfoAll.json")
-        df_sailor_info = runSailorData("racesfrtest.parquet", "trSailorInfoAll.json", "sailor_data2.parquet", "sailor_data2.parquet")
-    else: 
+        df_sailor_info = runSailorData("racesfr.parquet", "trSailorInfoAll.json", "sailor_data2.parquet", "sailor_data2.parquet")
+    else:
         print("Reading from files.")
-        df_races_fr = pd.read_parquet(rootDir + "racesfrtest.parquet")
+        df_races_fr = pd.read_parquet(rootDir + "racesfr.parquet")
+        df_results_fr = pd.read_parquet(rootDir + "resultsfr.parquet")
         df_races_tr = pd.read_parquet(rootDir + "racesTR.parquet")
         df_sailor_info = pd.read_parquet(rootDir + "sailor_data2.parquet")
         
@@ -261,14 +280,14 @@ def load(rootDir : str, config: Config):
     except FileNotFoundError:
         calculatedAtDict = {}
     
-    return df_races_full, df_sailor_info, df_sailor_ratings, calculatedAtDict
+    return df_races_full, df_results_fr, df_sailor_info, df_sailor_ratings, calculatedAtDict
 # %%
 def main(rootDir : str = "", jupyter = False):
     # %% Load Files
-    
+
     config : Config = Config()
 
-    df_races_full, df_sailor_info, df_sailor_ratings, calculatedAtDict = load(rootDir, config)
+    df_races_full, df_results_fr, df_sailor_info, df_sailor_ratings, calculatedAtDict = load(rootDir, config)
     
     # df_races_full = df_races_full.loc[df_races_full['season'] == 'f25']
 
@@ -278,13 +297,19 @@ def main(rootDir : str = "", jupyter = False):
     people = setupPeople(df_sailor_ratings, df_sailor_info, config)
     del df_sailor_info, df_sailor_ratings
     people, df_races_full = handleMerges(df_races_full, people, config)
-    
+    df_races_full = addBoatsInRace(df_races_full, df_results_fr)
+
     print("Setup complete.\nStarting calculations.")
     
     # %% Calculations
     regatta_info = calculateAllRegattaInfo(people, df_races_full, calculatedAtDict, config)
     people, allFrRaces, allTrRaces = calculateAllRaces(people, df_races_full, regatta_info, calculatedAtDict, config)
-    
+
+    # Women's regattas are only known from the sailors' genders. A regatta with no RP
+    # entered has no sailors to go on, so it is treated as open.
+    regattaRatingTypes = {name[0]: info['ratingType'] for name, info in regatta_info.items()}
+    df_results_fr['ratingType'] = df_results_fr['Regatta'].map(regattaRatingTypes).fillna('fr')
+
     del regatta_info
     
     df_cleaned = df_races_full.dropna(
@@ -292,16 +317,29 @@ def main(rootDir : str = "", jupyter = False):
     team_link_map = pd.Series(df_cleaned.Teamlink.values, index=df_cleaned.Team).to_dict()
     
     people = calculateSailorRanks(people, config)
-    updateSailorRatios(people)
-    
+
     df_rivals = buildRivals(df_races_full, config)
+
+    # Every post-calc row has to still correspond to a scraped race entry. A team that
+    # fixes the wrong sailors it entered leaves no scraped row for the people taken off,
+    # so races not recalculated this run would otherwise carry their old rows forward.
+    validFrRows = set()
+    if not config.calcAll:
+        df_frSource = df_races_full.loc[df_races_full['Scoring'] != 'team']
+        validFrRows = set(zip(df_frSource['raceID'], df_frSource['key']))
+        del df_frSource
+
     del df_races_full
-    
+
     if not config.calcAll:
         df_oldFrPostCalcRaces = pd.read_parquet(rootDir + 'postcalcFRraces.parquet')
         existing_race_ids = set(race.get('raceID') for race in allFrRaces)
         new_rows = df_oldFrPostCalcRaces[~df_oldFrPostCalcRaces['raceID'].isin(existing_race_ids)]
-        allFrRaces.extend(new_rows.to_dict('records'))
+        carried = [r for r in new_rows.to_dict('records')
+                   if (r['raceID'], r['sailorID']) in validFrRows]
+        if len(carried) != len(new_rows):
+            print(f"Dropped {len(new_rows) - len(carried)} carried-forward fleet rows no longer in the scrape")
+        allFrRaces.extend(carried)
         del df_oldFrPostCalcRaces
     
         df_oldTrPostCalcRaces = pd.read_parquet(rootDir + 'postcalcTRraces.parquet')
@@ -314,6 +352,8 @@ def main(rootDir : str = "", jupyter = False):
     df_trAfter = pd.DataFrame(allTrRaces)
     
     del allFrRaces, allTrRaces
+
+    updateSailorRatios(people, df_frAfter)
     # %%
     outlinks_dict = df_frAfter.groupby('sailorID')['outLinks'].sum().to_dict()
     
@@ -328,21 +368,24 @@ def main(rootDir : str = "", jupyter = False):
     racecounts_dict = {}
     for (s_id, pos, season), count in counts.items():
         racecounts_dict.setdefault(s_id, {}).setdefault(pos.lower(), {})[season] = count
-    
+
+    # Total rated races per sailor, for the numRaces field in sailors-latest.json.
+    totalracecounts_dict = counts.groupby(level='sailorID').sum().to_dict()
+
     del counts
     
     print("Calculations finished.\nOutputting to files")
     
     # %% File Output
     
-    outputSailorsToFile(people, rootDir, config)
+    outputSailorsToFile(people, rootDir, config, raceCounts=totalracecounts_dict)
     
     df_rivals.to_parquet(rootDir + 'rivalstesting.parquet')
     
     df_frAfter.to_parquet(rootDir + "postcalcFRraces.parquet")
     df_trAfter.to_parquet(rootDir + "postcalcTRraces.parquet")
     
-    with open("calculated_at_dict.json", "w") as f:
+    with open(rootDir + "calculated_at_dict.json", "w") as f:
         json.dump(calculatedAtDict, f) 
     
     print("File output finished.")
@@ -350,7 +393,7 @@ def main(rootDir : str = "", jupyter = False):
     # %% Upload data
     if config.doUpload:
         print("Uploading to db")
-        upload(people, df_frAfter, df_trAfter, df_rivals, outlinks_dict, racecounts_dict, winp_dict, team_link_map, config)
+        upload(people, df_frAfter, df_trAfter, df_results_fr, df_rivals,outlinks_dict, racecounts_dict, winp_dict, team_link_map, config)
 
 # %% Main 
 if __name__ == "__main__":

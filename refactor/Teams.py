@@ -10,10 +10,12 @@ def getOrderedSailors(people : list[Sailor], ratingType, pos, outlinks_dict, con
     numTops = config.numTops['tr' if 't' in ratingType else 'fr']['open' if 'w' not in ratingType else 'womens']
     isTR = 't' in ratingType
     outlinks_keys = outlinks_dict.keys()
-    orderedSailors = sorted([p for p in people
-                            if p.isRankEligible(config.targetSeasons, pos, config.gradCutoff, outLinks= outlinks_dict[p.key] if p.key in outlinks_keys else None, needsOutlinks= not isTR)
-                             and getattr(p, ratingType).mu != config.model.mu
-                             ],
+    eligible_people = [p for p in people
+                        if p.isRankEligible(config.targetSeasons, pos, config.gradCutoff,
+                                             outLinks= outlinks_dict[p.key] if p.key in outlinks_keys else None, 
+                                             needsOutlinks= not isTR)
+                        and getattr(p, ratingType).mu != config.model.mu]
+    orderedSailors = sorted(eligible_people,
                             key=lambda x: getattr(x, ratingType).ordinal(
                                 target=config.targetElo, alpha=config.alpha),
                             reverse=True)
@@ -108,33 +110,31 @@ def calculateAvgRatio(filtered_people: list[Sailor], winp_dict):
     return avgRatio
 
 def calculateAvgRating(people : list[Sailor], config:Config):
+    """Average of each sailor's best fleet rating (sr, cr, wsr, wcr).
+
+    Fleet racing only. A rating the sailor has never raced in is left out, and a sailor
+    with no fleet rating at all is left out of the average rather than counted as 0.
+    """
     ratings = []
     for p in people:
-        sr = p.sr.ordinal(target=config.targetElo, alpha=config.alpha)
-        cr = p.cr.ordinal(target=config.targetElo, alpha=config.alpha)
-        wsr = p.wsr.ordinal(target=config.targetElo, alpha=config.alpha)
-        wcr = p.wcr.ordinal(target=config.targetElo, alpha=config.alpha)
-        ratings.append(max([sr if sr != config.targetElo else 0, 
-                         cr if cr != config.targetElo else 0, 
-                         wsr if wsr != config.targetElo else 0, 
-                         wcr if wcr != config.targetElo else 0]))
-        
-        tsr = p.sr.ordinal(target=config.targetElo, alpha=config.alpha)
-        tcr = p.cr.ordinal(target=config.targetElo, alpha=config.alpha)
-        wtsr = p.wsr.ordinal(target=config.targetElo, alpha=config.alpha)
-        wtcr = p.wcr.ordinal(target=config.targetElo, alpha=config.alpha)
-        ratings.append(max([tsr if tsr != config.targetElo else 0, 
-                         tcr if tcr != config.targetElo else 0, 
-                         wtsr if wtsr != config.targetElo else 0, 
-                         wtcr if wtcr != config.targetElo else 0]))
+        rated = [r for r in (p.sr, p.cr, p.wsr, p.wcr)
+                 if (r.mu, r.sigma) != (config.model.mu, config.model.sigma)]
+        if rated:
+            ratings.append(max(r.ordinal(target=config.targetElo, alpha=config.alpha) for r in rated))
 
     return sum(ratings) / len(ratings) if len(ratings) > 0 else 0
     
 def uploadTeams(people: dict[str, Sailor], outlinks_dict, racecounts_dict, winp_dict, team_link_map, connection, config: Config):
+    # Group by season entries, not p.teams: p.teams comes from sailor info and goes stale when a team is renamed
+    sailorsByTeam : dict[str, list[Sailor]] = {}
+    for p in people.values():
+        for t in {t for pos in ('skipper', 'crew') for _, t in p.seasons[pos]}:
+            sailorsByTeam.setdefault(t, []).append(p)
+
     for team, region in teamRegions.items():
-        # if team != 'Northeastern':
+        # if team != 'MIT':
         #     continue
-        sailors : list[Sailor] = [p for key, p in people.items() if team in p.teams]
+        sailors : list[Sailor] = sailorsByTeam.get(team, [])
         currentSailors : list[Sailor] = [p for p in sailors if p.isOnTeamInSeasons(team, config.targetSeasons)]
         
         topRating, topSkippers, topCrews = calculateTopSailors(currentSailors, outlinks_dict, False, False, config)

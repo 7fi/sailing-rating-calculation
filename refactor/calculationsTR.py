@@ -47,18 +47,21 @@ def getPartners(boats, pos):
 
 def getTeamVals(row, people : dict[str, Sailor], rowVal : str, rowBoatVal : str, womens, pos, config:Config):
     teamName = row[rowVal].iat[0]
+    boats = row[rowBoatVal].iat[0]
     teamKeys = [boat[pos.lower() + 'Key'] if boat[pos.lower() + 'Key']
-                 is not None else 'Unknown' for boat in row[rowBoatVal].iat[0]]
-    for oldkey, newkey in config.merges.items():
-        if oldkey in teamKeys:
-            teamKeys = [k if k != oldkey else newkey for k in teamKeys]
-            
-    teamRacers = [people[key]
-                   for key in teamKeys if key != 'Unknown' and key in people.keys()]
-    
+                 is not None else 'Unknown' for boat in boats]
+    teamKeys = [config.merges.get(k, k) for k in teamKeys]
+
+    # Keep each racer's boat alongside them. Partners are read from these boats, so
+    # dropping a racer has to drop their boat too or every later partner shifts by one.
+    kept = [(people[key], boat) for key, boat in zip(teamKeys, boats)
+            if key != 'Unknown' and key in people.keys()]
+    teamRacers = [racer for racer, _ in kept]
+    teamBoats = [boat for _, boat in kept]
+
     teamRatings = [r.getRating(pos, 'team', womens) for r in teamRacers]
-    
-    return teamName, teamRacers, teamRatings
+
+    return teamName, teamRacers, teamRatings, teamBoats
 
 def updateRacesForTeam(allRaces : list[dict], tLetter, index, racers, oppRacers, boats, starting, teamName, pos, season, womens, row, date, predictions, venue, regattaAvg, ratings, config : Config):
     oLetter = 'A' if tLetter == 'B' else 'B'
@@ -133,8 +136,8 @@ def updateRacesForTeam(allRaces : list[dict], tLetter, index, racers, oppRacers,
 def calculateTR(allRaces : list[dict], people : dict[str, Sailor], resetDate, date : str, row, pos : str, season : str, regattaAvg : float, womens : bool, config : Config):
     venue = row['Venue'].iat[0]
 
-    teamAName, teamARacers, teamARatings = getTeamVals(row, people, 'teamAName', 'teamABoats', womens, pos, config)
-    teamBName, teamBRacers, teamBRatings = getTeamVals(row, people, 'teamBName', 'teamBBoats', womens, pos, config)
+    teamAName, teamARacers, teamARatings, teamABoats = getTeamVals(row, people, 'teamAName', 'teamABoats', womens, pos, config)
+    teamBName, teamBRacers, teamBRatings, teamBBoats = getTeamVals(row, people, 'teamBName', 'teamBBoats', womens, pos, config)
 
     startingARating = [r.ordinal(target=config.targetElo, alpha=config.alpha) for r in teamARatings]
     startingBRating = [r.ordinal(target=config.targetElo, alpha=config.alpha) for r in teamBRatings]
@@ -153,6 +156,6 @@ def calculateTR(allRaces : list[dict], people : dict[str, Sailor], resetDate, da
     updateRatings(womens, teamARacers, teamARatings, pos)
     updateRatings(womens, teamBRacers, teamBRatings, pos)
     
-    updateRacesForTeam(allRaces, 'A', 0, teamARacers, teamBRacers, row['teamABoats'].iat[0], startingARating, teamAName, pos, season, womens, row, date, predictions, venue, regattaAvg, teamARatings, config)
-    
-    updateRacesForTeam(allRaces, 'B', 1, teamBRacers, teamARacers, row['teamBBoats'].iat[0], startingBRating, teamBName, pos, season, womens, row, date, predictions, venue, regattaAvg, teamBRatings, config)
+    updateRacesForTeam(allRaces, 'A', 0, teamARacers, teamBRacers, teamABoats, startingARating, teamAName, pos, season, womens, row, date, predictions, venue, regattaAvg, teamARatings, config)
+
+    updateRacesForTeam(allRaces, 'B', 1, teamBRacers, teamARacers, teamBBoats, startingBRating, teamBName, pos, season, womens, row, date, predictions, venue, regattaAvg, teamBRatings, config)

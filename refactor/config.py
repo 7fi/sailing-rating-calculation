@@ -8,7 +8,6 @@ class Config:
     model: PlackettLuce = field(default_factory=lambda: PlackettLuce(beta=25.0/120.0))
     alpha : float = 200 / (25.0 / 3.0)
     targetSeasons : ClassVar[list[str]] = ['s26', 'f26']
-    targetTRSeasons : ClassVar[list[str]] = ['s26']
     gradCutoff : int = 2026
     merges: ClassVar[dict[str, str]] = {
         'carter-anderson-2027': 'carter-anderson',
@@ -22,17 +21,21 @@ class Config:
         'kaelyn-holmes-2029': 'kaelyn-holmes',
         'Nathalie Caudron-Northeastern': 'nathalie-caudron', 
         'olivia-figley-2026': 'olivia-figley',
-        'Winter vetrone-Northeastern': 'winter-vetrone'
+        'Winter vetrone-Northeastern': 'winter-vetrone',
+        'pierce-olsen-2029' : "pierce-olsen",
+        # 'fynn-olsen-2029' : 'fynn-olsen',
+        'marcus-abate-2020' : 'marcus-abate'
     }
     numTops : ClassVar[dict[str, int]] = {'fr': {'open': 3, 'womens': 2}, 'tr': {'open': 3, 'womens': 3}}
     requiredOutLinks : int = 120
     
-    frfile = 'racesfrtest.parquet'
+    # frfile = 'racesfrtest.parquet'
+    frfile = 'racesfr.parquet'
     trfile = 'racesTR.parquet'
     trSailorInfoFile = 'trSailorinfoAll.json'
     
     sailorInfoFile = 'sailor_data2.parquet'
     
-    doScrape : bool = False
+    doScrape : bool = True
     calcAll : bool = True
     doUpload : bool = True

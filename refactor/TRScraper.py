@@ -5,6 +5,46 @@ import numpy as np
 from datetime import date
 from datetime import date, datetime
 import os
+import time
+from pageCache import readPage, writePage
+
+def readCachedPage(path):
+  """The cached HTML at path, or None if there is none or it is not a regatta page.
+
+  Error responses used to be cached like any other page and then read back on every
+  run, so a regatta whose first fetch failed was skipped for good. Every real regatta
+  page carries the location tag; a cached 404 page does not.
+  """
+  if not os.path.exists(path):
+    return None
+  html = readPage(path)
+  return html if 'itemprop="location"' in html else None
+
+def fetchPage(url, path, retries=5):
+  """Fetch url and cache it at path, retrying transient failures.
+
+  Returns the HTML, or None if the page could not be fetched. Only a 200 response is
+  cached, so a failed regatta is simply fetched again on the next run.
+  """
+  backoff = 1
+  error = None
+  for attempt in range(retries):
+    try:
+      page = requests.get(url, timeout=30)
+    except requests.RequestException as e:
+      error = e
+    else:
+      if page.status_code == 200:
+        writePage(path, page)
+        return page.text
+      error = page.status_code
+      if page.status_code != 429 and page.status_code < 500:
+        break  # not worth retrying
+    if attempt < retries - 1:
+      time.sleep(backoff)
+      backoff *= 2
+  print(f"Could not fetch {url} ({error}). Skipping...")
+  return None
 
 def makeRaceList(raceRows):
   raceList = []
@@ -342,9 +382,11 @@ def setup(infile):
       if rescrape:
           print(link['href'], regatta_date)
           
-      scrape = (season + "/" + link['href']) not in df_old['Regatta'].unique() or rescrape
+      # Techscore hrefs are absolute ("/f16/slug/"), so keep only the slug to match stored IDs
+      regatta_link = season + "/" + link['href'].strip("/").split("/")[-1]
+      scrape = regatta_link not in df_old['Regatta'].unique() or rescrape
       if (scoring == "Team") and scrape:
-          regattas[season + "/" + link['href']] = {"link":season + "/" + link['href'], "scoring": scoring, 'rescrape': rescrape}
+          regattas[regatta_link] = {"link": regatta_link, "scoring": scoring, 'rescrape': rescrape}
   print(len(regattas))
   
 #   regattas = {'s26/harvard-women-team-race': {"link": 's26/harvard-women-team-race', "scoring": 'team', 'rescrape': True}}
@@ -356,58 +398,81 @@ def setup(infile):
       link = regatta['link']
       rescrape = regatta['rescrape']
       
-      allRaces = sailors = report = None
       regattaID = list(regattas.keys())[i]
-      
+
       if not os.path.exists(f"pagesTR/{link.split("/")[0]}"):
           os.makedirs(f"pagesTR/{link.split("/")[0]}")
-      if os.path.exists(f"pagesTR/{link}-allraces.html") and os.path.exists(f"pagesTR/{link}-sailors.html") and os.path.exists(f"pagesTR/{link}-report.html") and not rescrape:
+
+      # (soup name, url ending, cache file suffix)
+      pageSpecs = [('allRaces', 'all/', 'allraces'), ('sailors', 'sailors/', 'sailors'), ('report', '', 'report')]
+      cached = {} if rescrape else {name: readCachedPage(f"pagesTR/{link}-{suffix}.html") for name, _, suffix in pageSpecs}
+
+      if not rescrape and all(cached.values()):
           if i % 50 == 0:
               print(f"({i + 1}/{len(list(regattas.values()))}) getting soup from file for {regattaID}")
-          with open(f"pagesTR/{link}-allraces.html", "r") as f:
-              allRaces = BeautifulSoup(f.read(), 'html.parser')
-          with open(f"pagesTR/{link}-sailors.html", "r") as f:
-              sailors = BeautifulSoup(f.read(), 'html.parser')
-          with open(f"pagesTR/{link}-report.html", "r") as f:
-              report = BeautifulSoup(f.read(), 'html.parser')
+          htmls = cached
       else:
           print(f"({i + 1}/{len(list(regattas.values()))}) getting soup for {regattaID}")
-          # all races
-          url = f"https://scores.collegesailing.org/{regatta['link']}/all/"
-          page = requests.get(url)
-          with open(f"pagesTR/{link}-allraces.html", "w") as f:
-                          f.write(str(page.content))
-          allRaces = BeautifulSoup(page.content, 'html.parser')
+          htmls = {name: fetchPage(f"https://scores.collegesailing.org/{link}/{ending}", f"pagesTR/{link}-{suffix}.html")
+                   for name, ending, suffix in pageSpecs}
+          if not all(htmls.values()):
+              # Left out of this run entirely; it is not in df_old, so the next run tries again.
+              print(f"Skipping {regattaID}: not every page could be fetched")
+              continue
 
-          # sailors
-          url = f"https://scores.collegesailing.org/{regatta['link']}/sailors/"
-          page = requests.get(url)
-          with open(f"pagesTR/{link}-sailors.html", "w") as f:
-                          f.write(str(page.content))
-          sailors = BeautifulSoup(page.content, 'html.parser')
-          
-          url = f"https://scores.collegesailing.org/{regatta['link']}/"
-          page = requests.get(url)
-          with open(f"pagesTR/{link}-report.html", "w") as f:
-                          f.write(str(page.content))
-          report = BeautifulSoup(page.content, 'html.parser')
-      
-      regattaSoups[regattaID] = {"allRaces": allRaces, "sailors": sailors, 'report': report, "scoring": regatta['scoring']}
+      regattaSoups[regattaID] = {name: BeautifulSoup(html, 'html.parser') for name, html in htmls.items()}
+      regattaSoups[regattaID]['scoring'] = regatta['scoring']
       
   return regattaSoups, df_old, regattas
         
 
-def scrapeTR(infile, outfile, outInfoFile):    
+def buildSailorInfo(df_races, totalSailors, infoFile):
+  """Every sailor in every stored team race, for runSailorData to look up.
+
+  This used to hold only the sailors from regattas scraped in the current run. A
+  regatta is only scraped once, so if the sailor lookup failed that run, or never ran,
+  its team-race-only sailors dropped out of the file and were never looked up again -
+  and the calculation silently leaves out racers it has no sailor for.
+
+  Boats do not record a year, so a sailor's entry from a scrape (this run's, or kept
+  from an earlier file) wins over the one rebuilt from the boats.
+  """
+  sailors = {}
+  for _, row in df_races.iterrows():
+    for side in ['A', 'B']:
+      boats = row[f'team{side}Boats']
+      if boats is None:
+        continue
+      for boat in boats:
+        for pos in ['skipper', 'crew']:
+          key = boat[pos + 'Key']
+          if key is None or pd.isna(key):
+            continue
+          sailors[key] = {'name': boat[pos + 'Name'], 'year': None, 'link': boat[pos + 'Link'], 'key': key, 'team': row[f'team{side}Name']}
+
+  try:
+    previous = pd.read_json(infoFile)
+    if 'key' in previous.columns:
+      for record in previous.to_dict('records'):
+        if record['key'] in sailors:
+          sailors[record['key']] = record
+  except (FileNotFoundError, ValueError):
+    pass
+
+  sailors.update({k: v for k, v in totalSailors.items() if k is not None and not pd.isna(k)})
+  return sailors
+
+def scrapeTR(infile, outfile, outInfoFile):
   print("Scraping TR")
   regattaSoups, df_old, regattas = setup(infile)
   data, totalSailors = getData(regattaSoups, regattas)
-  
+
   df_cur = pd.DataFrame(data)
   df_combined = pd.concat([df_old, df_cur])
 
   df_final = df_combined.drop_duplicates(subset='raceID', keep='last').reset_index(drop=True)
 
-  df_totalSailors2 = pd.DataFrame.from_dict(totalSailors,orient='index')
+  df_totalSailors2 = pd.DataFrame.from_dict(buildSailorInfo(df_final, totalSailors, outInfoFile), orient='index')
   df_totalSailors2 = df_totalSailors2.reset_index(drop=True)
   df_totalSailors2.to_json(outInfoFile, index=False)
 
